@@ -56,7 +56,7 @@ static BOOL bScaleScreen = PAL_SCALE_SCREEN;
 static WORD               g_wShakeTime       = 0;
 static WORD               g_wShakeLevel      = 0;
 
-//#define FORCE_OPENGL_CORE_PROFILE 1
+#define FORCE_OPENGL_CORE_PROFILE 1
 
 #if PAL_HAS_GLSL
 static uint32_t gProgramIds[]={-1,-1,-1};
@@ -64,7 +64,8 @@ static uint32_t gVAOIds[3]; // 0 for game screen; 1 for touch overlay; 2 for fin
 static uint32_t gVBOIds[3];
 static uint32_t gPassID = -1;
 //static uint32_t gIBOId;
-static int gMVPSlots[3], gTextureSizeSlots[3], gHDRSlot[3];
+static int gMVPSlots[3], gTextureSizeSlots[3], gHDRSlot[3], gSRGBSlot[3];
+static int manualSRGB = 0;
 static int glversion_major, glversion_minor;
 static SDL_Texture *gpBackBuffer;
 
@@ -278,7 +279,8 @@ precision mediump float;            \r\n\
 #endif                              \r\n\
 COMPAT_VARYING vec2 v_texCoord;     \r\n\
 uniform sampler2D tex0;             \r\n\
-uniform int HDR;					\r\n\
+uniform int HDR;                    \r\n\
+uniform int sRGB;                    \r\n\
 vec3 ACESFilm(vec3 x)				\r\n\
 {									\r\n\
 	const float A = 2.51;			\r\n\
@@ -315,7 +317,9 @@ FragColor.rgb = FragColor.bgr;   	\r\n\
 #endif                              \r\n\
 vec3 color = FragColor.rgb;			\r\n\
 if( HDR > 0 )						\r\n\
-	color = ACESFilm(FragColor.rgb);\r\n\
+	color = ACESFilm(color);        \r\n\
+if( sRGB > 0 )                      \r\n\
+    color = rgb_to_srgb(color);     \r\n\
 FragColor.rgb=color; \r\n\
 }";
 static char *plain_glsl_frag_overlay = "\r\n\
@@ -470,6 +474,10 @@ void setupShaderParams(int pass){
    gHDRSlot[pass] = glGetUniformLocation(gProgramIds[pass], "HDR");
    if(gHDRSlot[pass] < 0)
       UTIL_LogOutput(LOGLEVEL_DEBUG, "uniform HDR not exist");
+
+   gSRGBSlot[pass] = glGetUniformLocation(gProgramIds[pass], "sRGB");
+   if(gSRGBSlot[pass] < 0)
+      UTIL_LogOutput(LOGLEVEL_DEBUG, "uniform sRGB not exist");
 }
 
 int VIDEO_RenderTexture(SDL_Renderer * renderer, SDL_Texture * texture, const SDL_Rect * srcrect, const SDL_Rect * dstrect, int pass)
@@ -483,7 +491,8 @@ int VIDEO_RenderTexture(SDL_Renderer * renderer, SDL_Texture * texture, const SD
    SDL_GL_BindTexture(texture, &texw, &texh);
     
 #ifndef GL_ES_VERSION_3_0
-   glEnable(GL_FRAMEBUFFER_SRGB);
+   if(!manualSRGB)
+	   glEnable(GL_FRAMEBUFFER_SRGB);
 #endif
 
    if(gProgramIds[pass] != -1) {
@@ -501,6 +510,8 @@ int VIDEO_RenderTexture(SDL_Renderer * renderer, SDL_Texture * texture, const SD
 	
    GLint HDR = gConfig.fEnableHDR;
    glUniform1iv(gHDRSlot[pass], 1, &HDR);
+
+   glUniform1iv(gSRGBSlot[pass], 1, &manualSRGB);
 
    SDL_Rect _srcrect,_dstrect;
    
@@ -704,16 +715,41 @@ VIDEO_Startup(
 #  endif
 #endif
    }
+
+#if PAL_HAS_GLSL
    //
    // iOS need this line to enable color correction
    //
    SDL_GL_SetAttribute(SDL_GL_FRAMEBUFFER_SRGB_CAPABLE, 1);
+
+# if __EMSCRIPTEN__
+   //
+   // WebGL will not crash with sRGB capable, but will not work with it too.
+   //
+   manualSRGB = 1;
+# endif
+#endif
 
    //
    // Before we can render anything, we need a window and a renderer.
    //
    gpWindow = SDL_CreateWindow("Pal", SDL_WINDOWPOS_UNDEFINED, SDL_WINDOWPOS_UNDEFINED,
                                gConfig.dwScreenWidth, gConfig.dwScreenHeight, PAL_VIDEO_INIT_FLAGS | (gConfig.fFullScreen ? SDL_WINDOW_BORDERLESS : 0) );
+
+#if PAL_HAS_GLSL
+   //
+   // Android MAY completely unable to initial with sRGB framebuffer capability requested. Try again without it if happened.
+   //
+   if( gpWindow == NULL )
+   {
+      if(!SDL_GL_ExtensionSupported("GL_ARB_FRAMEBUFFER_SRGB") && !SDL_GL_ExtensionSupported("GL_EXT_FRAMEBUFFER_SRGB") )
+      {
+         manualSRGB = 1;
+         SDL_GL_SetAttribute(SDL_GL_FRAMEBUFFER_SRGB_CAPABLE, 0);
+         gpWindow = SDL_CreateWindow("Pal", SDL_WINDOWPOS_UNDEFINED, SDL_WINDOWPOS_UNDEFINED, gConfig.dwScreenWidth, gConfig.dwScreenHeight, PAL_VIDEO_INIT_FLAGS | (gConfig.fFullScreen ? SDL_WINDOW_BORDERLESS : 0) );
+      }
+   }
+#endif
 
    if (gpWindow == NULL)
    {
