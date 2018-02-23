@@ -316,7 +316,7 @@ FragColor.rgb = FragColor.bgr;   	\r\n\
 vec3 color = FragColor.rgb;			\r\n\
 if( HDR > 0 )						\r\n\
 	color = ACESFilm(FragColor.rgb);\r\n\
-FragColor.rgb=rgb_to_srgb(color); \r\n\
+FragColor.rgb=color; \r\n\
 }";
 static char *plain_glsl_frag_overlay = "\r\n\
 #if __VERSION__ >= 130              \r\n\
@@ -481,6 +481,10 @@ int VIDEO_RenderTexture(SDL_Renderer * renderer, SDL_Texture * texture, const SD
    GLfloat texw;
    GLfloat texh;
    SDL_GL_BindTexture(texture, &texw, &texh);
+    
+#ifndef GL_ES_VERSION_3_0
+   glEnable(GL_FRAMEBUFFER_SRGB);
+#endif
 
    if(gProgramIds[pass] != -1) {
       glGetIntegerv(GL_CURRENT_PROGRAM,&oldProgramId);
@@ -700,8 +704,12 @@ VIDEO_Startup(
 #  endif
 #endif
    }
+   //
+   // iOS need this line to enable color correction
+   //
+   SDL_GL_SetAttribute(SDL_GL_FRAMEBUFFER_SRGB_CAPABLE, 1);
 
-    //
+   //
    // Before we can render anything, we need a window and a renderer.
    //
    gpWindow = SDL_CreateWindow("Pal", SDL_WINDOWPOS_UNDEFINED, SDL_WINDOWPOS_UNDEFINED,
