@@ -62,10 +62,11 @@ static WORD               g_wShakeLevel      = 0;
 static uint32_t gProgramIds[]={-1,-1,-1};
 static uint32_t gVAOIds[3]; // 0 for game screen; 1 for touch overlay; 2 for final blit
 static uint32_t gVBOIds[3];
+static uint32_t gEBOId;
 static uint32_t gPassID = -1;
-//static uint32_t gIBOId;
 static int gMVPSlots[3], gTextureSizeSlots[3], gHDRSlot[3], gSRGBSlot[3];
 static int manualSRGB = 0;
+static int VAOSupported = 1;
 static int glversion_major, glversion_minor;
 static SDL_Texture *gpBackBuffer;
 
@@ -156,7 +157,7 @@ int initGLExtensions() {
 	return glCreateShader && glShaderSource && glCompileShader && glGetShaderiv && 
 		glGetShaderInfoLog && glDeleteShader && glAttachShader && glCreateProgram &&
 		glLinkProgram && glValidateProgram && glGetProgramiv && glGetProgramInfoLog &&
-		glUseProgram && glGenVertexArrays && glBindVertexArray && glGenBuffers &&
+		glUseProgram && glGenBuffers &&
         glBindBuffer && glBufferData && glBufferSubData && glGetAttribLocation &&
         glEnableVertexAttribArray && glVertexAttribPointer && glUniformMatrix4fv;
 }
@@ -169,10 +170,10 @@ for ( GLenum Error = glGetError( ); ( GL_NO_ERROR != Error ); Error = glGetError
 {\
 switch ( Error )\
 {\
-case GL_INVALID_ENUM:      UTIL_LogOutput(LOGLEVEL_DEBUG,  "\n%s\n\n", "GL_INVALID_ENUM"      ); assert( 0 ); break;\
-case GL_INVALID_VALUE:     UTIL_LogOutput(LOGLEVEL_DEBUG,  "\n%s\n\n", "GL_INVALID_VALUE"     ); assert( 0 ); break;\
-case GL_INVALID_OPERATION: UTIL_LogOutput(LOGLEVEL_DEBUG,  "\n%s\n\n", "GL_INVALID_OPERATION" ); assert( 0 ); break;\
-case GL_OUT_OF_MEMORY:     UTIL_LogOutput(LOGLEVEL_DEBUG,  "\n%s\n\n", "GL_OUT_OF_MEMORY"     ); assert( 0 ); break;\
+case GL_INVALID_ENUM:      UTIL_LogOutput(LOGLEVEL_DEBUG,  "%s\n", "GL_INVALID_ENUM"      ); assert( 0 ); break;\
+case GL_INVALID_VALUE:     UTIL_LogOutput(LOGLEVEL_DEBUG,  "%s\n", "GL_INVALID_VALUE"     ); assert( 0 ); break;\
+case GL_INVALID_OPERATION: UTIL_LogOutput(LOGLEVEL_DEBUG,  "%s\n", "GL_INVALID_OPERATION" ); assert( 0 ); break;\
+case GL_OUT_OF_MEMORY:     UTIL_LogOutput(LOGLEVEL_DEBUG,  "%s\n", "GL_OUT_OF_MEMORY"     ); assert( 0 ); break;\
 default:                                                                              break;\
 }\
 }\
@@ -399,13 +400,13 @@ GLuint compileShader(const char* sourceOrFilename, GLuint shaderType, int is_sou
         {
             GLchar *log = (GLchar*)malloc(logLength);
             glGetShaderInfoLog(result, logLength, &logLength, log);
-            UTIL_LogOutput(LOGLEVEL_DEBUG, "shader %s compilation error:%s", is_source ? "stock" : sourceOrFilename,log);
+            UTIL_LogOutput(LOGLEVEL_DEBUG, "shader %s compilation error:%s\n", is_source ? "stock" : sourceOrFilename,log);
             free(log);
         }
         glDeleteShader(result);
         result = 0;
     }else
-       UTIL_LogOutput(LOGLEVEL_DEBUG, "%s shader %s compilation succeed!", SHADER_TYPE(shaderType), is_source ? "stock" : sourceOrFilename );
+       UTIL_LogOutput(LOGLEVEL_DEBUG, "%s shader %s compilation succeed!\n", SHADER_TYPE(shaderType), is_source ? "stock" : sourceOrFilename );
     return result;
 }
 
@@ -432,10 +433,10 @@ GLuint compileProgram(const char* vtx, const char* frag,int is_source) {
             char* log = (char*) malloc(logLen * sizeof(char));
             // Show any errors as appropriate
             glGetProgramInfoLog(programId, logLen, &logLen, log);
-            UTIL_LogOutput(LOGLEVEL_DEBUG, "shader linkage error:%s",log);
+            UTIL_LogOutput(LOGLEVEL_DEBUG, "shader linkage error:%s\n",log);
             free(log);
         }else
-           UTIL_LogOutput(LOGLEVEL_DEBUG, "shaders linkage succeed!");
+           UTIL_LogOutput(LOGLEVEL_DEBUG, "shaders linkage succeed!\n");
     }
     if(vtxShaderId) {
         glDeleteShader(vtxShaderId);
@@ -452,7 +453,7 @@ void setupShaderParams(int pass){
       glEnableVertexAttribArray(slot);
       glVertexAttribPointer(slot, 4, GL_FLOAT, GL_FALSE, sizeof(struct VertexDataFormat), (GLvoid*)offsetof(struct VertexDataFormat, position));
    }else{
-      UTIL_LogOutput(LOGLEVEL_DEBUG, "attrib VertexCoord not exist");
+      UTIL_LogOutput(LOGLEVEL_DEBUG, "attrib VertexCoord not exist\n");
    }
    
    slot = glGetAttribLocation(gProgramIds[pass], "TexCoord");
@@ -460,24 +461,24 @@ void setupShaderParams(int pass){
       glEnableVertexAttribArray(slot);
       glVertexAttribPointer(slot, 4, GL_FLOAT, GL_FALSE, sizeof(struct VertexDataFormat), (GLvoid*)offsetof(struct VertexDataFormat, texCoord));
    }else{
-      UTIL_LogOutput(LOGLEVEL_DEBUG, "attrib TexCoord not exist");
+      UTIL_LogOutput(LOGLEVEL_DEBUG, "attrib TexCoord not exist\n");
    }
    
    gMVPSlots[pass] = glGetUniformLocation(gProgramIds[pass], "MVPMatrix");
    if(gMVPSlots[pass] < 0)
-      UTIL_LogOutput(LOGLEVEL_DEBUG, "uniform MVPMatrix not exist");
+      UTIL_LogOutput(LOGLEVEL_DEBUG, "uniform MVPMatrix not exist\n");
    
    gTextureSizeSlots[pass] = glGetUniformLocation(gProgramIds[pass], "TextureSize");
    if(gTextureSizeSlots[pass] < 0)
-      UTIL_LogOutput(LOGLEVEL_DEBUG, "uniform TextureSize not exist");
+      UTIL_LogOutput(LOGLEVEL_DEBUG, "uniform TextureSize not exist\n");
 
    gHDRSlot[pass] = glGetUniformLocation(gProgramIds[pass], "HDR");
    if(gHDRSlot[pass] < 0)
-      UTIL_LogOutput(LOGLEVEL_DEBUG, "uniform HDR not exist");
+      UTIL_LogOutput(LOGLEVEL_DEBUG, "uniform HDR not exist\n");
 
    gSRGBSlot[pass] = glGetUniformLocation(gProgramIds[pass], "sRGB");
    if(gSRGBSlot[pass] < 0)
-      UTIL_LogOutput(LOGLEVEL_DEBUG, "uniform sRGB not exist");
+      UTIL_LogOutput(LOGLEVEL_DEBUG, "uniform sRGB not exist\n");
 }
 
 int VIDEO_RenderTexture(SDL_Renderer * renderer, SDL_Texture * texture, const SDL_Rect * srcrect, const SDL_Rect * dstrect, int pass)
@@ -562,17 +563,24 @@ int VIDEO_RenderTexture(SDL_Renderer * renderer, SDL_Texture * texture, const SD
    vData[ 2 ].position.x = maxx; vData[ 2 ].position.y = maxy; vData[ 2 ].position.z = 0.0; vData[ 2 ].position.w = 1.0;
    vData[ 3 ].position.x = minx; vData[ 3 ].position.y = maxy; vData[ 3 ].position.z = 0.0; vData[ 3 ].position.w = 1.0;
    
-   glBindVertexArray(gVAOIds[pass]);
+   if(VAOSupported) glBindVertexArray(gVAOIds[pass]);
    
    //Update vertex buffer data
    glBindBuffer( GL_ARRAY_BUFFER, gVBOIds[pass] );
    glBufferSubData( GL_ARRAY_BUFFER, 0, 4 * sizeof(struct VertexDataFormat), vData );
-   
+
+   if(!VAOSupported) glBindBuffer( GL_ELEMENT_ARRAY_BUFFER, gEBOId );
+	
    //Draw quad using vertex data and index data
    glDrawElements( GL_TRIANGLE_STRIP, 4, GL_UNSIGNED_INT, NULL );
-   //    glDrawArrays(GL_QUADS, 0,4);
-   
-   glBindVertexArray(0);
+
+   if(VAOSupported) glBindVertexArray(0);
+	
+   if(!VAOSupported) {
+      glBindBuffer( GL_ARRAY_BUFFER, 0 );
+      glBindBuffer( GL_ELEMENT_ARRAY_BUFFER, 0 );
+   }
+	
    if(gProgramIds[pass] != -1) {
       glUseProgram(oldProgramId);
    }
@@ -719,15 +727,17 @@ VIDEO_Startup(
 #if PAL_HAS_GLSL
    //
    // iOS need this line to enable color correction
-   //
-   SDL_GL_SetAttribute(SDL_GL_FRAMEBUFFER_SRGB_CAPABLE, 1);
-
-# if __EMSCRIPTEN__
-   //
    // WebGL will not crash with sRGB capable, but will not work with it too.
+   // after several tests, Android completely unable to initial video with sRGB framebuffer capability requested, and MAY CRASH on extension detection.
    //
+# if !__ANDROID__
+   SDL_GL_SetAttribute(SDL_GL_FRAMEBUFFER_SRGB_CAPABLE, 1);
+# endif
+
+# if __EMSCRIPTEN__ || __ANDROID__
    manualSRGB = 1;
 # endif
+
 #endif
 
    //
@@ -736,23 +746,9 @@ VIDEO_Startup(
    gpWindow = SDL_CreateWindow("Pal", SDL_WINDOWPOS_UNDEFINED, SDL_WINDOWPOS_UNDEFINED,
                                gConfig.dwScreenWidth, gConfig.dwScreenHeight, PAL_VIDEO_INIT_FLAGS | (gConfig.fFullScreen ? SDL_WINDOW_BORDERLESS : 0) );
 
-#if PAL_HAS_GLSL
-   //
-   // Android MAY completely unable to initial with sRGB framebuffer capability requested. Try again without it if happened.
-   //
-   if( gpWindow == NULL )
-   {
-      if(!SDL_GL_ExtensionSupported("GL_ARB_FRAMEBUFFER_SRGB") && !SDL_GL_ExtensionSupported("GL_EXT_FRAMEBUFFER_SRGB") )
-      {
-         manualSRGB = 1;
-         SDL_GL_SetAttribute(SDL_GL_FRAMEBUFFER_SRGB_CAPABLE, 0);
-         gpWindow = SDL_CreateWindow("Pal", SDL_WINDOWPOS_UNDEFINED, SDL_WINDOWPOS_UNDEFINED, gConfig.dwScreenWidth, gConfig.dwScreenHeight, PAL_VIDEO_INIT_FLAGS | (gConfig.fFullScreen ? SDL_WINDOW_BORDERLESS : 0) );
-      }
-   }
-#endif
-
    if (gpWindow == NULL)
    {
+      UTIL_LogOutput(LOGLEVEL_DEBUG, "CreateWindow failed, reason:%s\n", SDL_GetError());
       return -1;
    }
 
@@ -766,28 +762,28 @@ VIDEO_Startup(
       SDL_RendererInfo rendererInfo;
       SDL_GetRendererInfo(gpRenderer, &rendererInfo);
       
-      UTIL_LogOutput(LOGLEVEL_DEBUG, "render info:%s",rendererInfo.name);
+      UTIL_LogOutput(LOGLEVEL_DEBUG, "render info:%s\n",rendererInfo.name);
       if(!strncmp(rendererInfo.name, "opengl", 6)) {
 #     ifndef __APPLE__
          // If you want to use GLEW or some other GL extension handler, do it here!
          if (!initGLExtensions()) {
-            UTIL_LogOutput(LOGLEVEL_DEBUG,  "Couldn't init GL extensions!" );
+            UTIL_LogOutput(LOGLEVEL_DEBUG,  "Couldn't init GL extensions!\n" );
             SDL_Quit();
             exit(-1);
          }
 #     endif
       }
       char *glversion = (char*)glGetString(GL_VERSION);
-      UTIL_LogOutput(LOGLEVEL_DEBUG, "GL_VERSION:%s",glversion);
-      UTIL_LogOutput(LOGLEVEL_DEBUG, "GL_SHADING_LANGUAGE_VERSION:%s",glGetString(GL_SHADING_LANGUAGE_VERSION));
-      UTIL_LogOutput(LOGLEVEL_DEBUG, "GL_RENDERER:%s",glGetString(GL_RENDERER));
+      UTIL_LogOutput(LOGLEVEL_DEBUG, "GL_VERSION:%s\n",glversion);
+      UTIL_LogOutput(LOGLEVEL_DEBUG, "GL_SHADING_LANGUAGE_VERSION:%s\n",glGetString(GL_SHADING_LANGUAGE_VERSION));
+      UTIL_LogOutput(LOGLEVEL_DEBUG, "GL_RENDERER:%s\n",glGetString(GL_RENDERER));
       GLint maxTextureSize, maxDrawBuffers, maxColorAttachments;
       glGetIntegerv(GL_MAX_TEXTURE_SIZE, &maxTextureSize);
       glGetIntegerv(GL_MAX_DRAW_BUFFERS, &maxDrawBuffers);
       glGetIntegerv(GL_MAX_COLOR_ATTACHMENTS, &maxColorAttachments);
-      UTIL_LogOutput(LOGLEVEL_DEBUG, "GL_MAX_TEXTURE_SIZE:%d",maxTextureSize);
-      UTIL_LogOutput(LOGLEVEL_DEBUG, "GL_MAX_DRAW_BUFFERS:%d",maxDrawBuffers);
-      UTIL_LogOutput(LOGLEVEL_DEBUG, "GL_MAX_COLOR_ATTACHMENTS:%d",maxColorAttachments);
+      UTIL_LogOutput(LOGLEVEL_DEBUG, "GL_MAX_TEXTURE_SIZE:%d\n",maxTextureSize);
+      UTIL_LogOutput(LOGLEVEL_DEBUG, "GL_MAX_DRAW_BUFFERS:%d\n",maxDrawBuffers);
+      UTIL_LogOutput(LOGLEVEL_DEBUG, "GL_MAX_COLOR_ATTACHMENTS:%d\n",maxColorAttachments);
       SDL_sscanf(glversion, "%d.%d", &glversion_major, &glversion_minor);
       if( glversion_major >= 3 ) {
          GLint n, i;
@@ -796,19 +792,30 @@ VIDEO_Startup(
             UTIL_LogOutput(LOGLEVEL_DEBUG, "extension %d:%s\n", i, glGetStringi(GL_EXTENSIONS, i));
          }
       }else
-         UTIL_LogOutput(LOGLEVEL_DEBUG, "GL_EXTENSIONS:%s",glGetString(GL_EXTENSIONS));
+         UTIL_LogOutput(LOGLEVEL_DEBUG, "GL_EXTENSIONS:%s\n",glGetString(GL_EXTENSIONS));
+
+// both iOS/ANGLE emulated GLES2 supports VAO extension
+#if __ANDROID__
+       if(!strncmp(glversion, "OpenGL ES", 9)) {
+           SDL_sscanf(glversion, "OpenGL ES %d.%d", &glversion_major, &glversion_minor);
+           if( glversion_major <= 2)
+               VAOSupported = 0;
+       }
+#endif
 
       struct VertexDataFormat vData[ 4 ];
       GLuint iData[ 4 ];
-      GLuint ebo;
       //Set rendering indices
       iData[ 0 ] = 0;
       iData[ 1 ] = 1;
       iData[ 2 ] = 3;
       iData[ 3 ] = 2;
+	   
+	   if(VAOSupported) {
       // Initialize vertex array object
       glGenVertexArrays(3, gVAOIds);
       glBindVertexArray(gVAOIds[0]);
+	   }
       
       UTIL_LogSetPrelude("[PASS 1] ");
       gProgramIds[0] = compileProgram(gConfig.pszShader,gConfig.pszShader, 0);
@@ -819,31 +826,31 @@ VIDEO_Startup(
       glBufferData( GL_ARRAY_BUFFER, 4 * sizeof(struct VertexDataFormat), vData, GL_DYNAMIC_DRAW );
       
       //Create IBO
-      glGenBuffers( 1, &ebo );
-      glBindBuffer( GL_ELEMENT_ARRAY_BUFFER, ebo );
+      glGenBuffers( 1, &gEBOId );
+      glBindBuffer( GL_ELEMENT_ARRAY_BUFFER, gEBOId );
       glBufferData( GL_ELEMENT_ARRAY_BUFFER, 4 * sizeof(GLuint), iData, GL_DYNAMIC_DRAW );
       
       setupShaderParams(0);
       
-      glBindVertexArray(gVAOIds[1]);
+      if(VAOSupported) glBindVertexArray(gVAOIds[1]);
       glBindBuffer( GL_ARRAY_BUFFER, gVBOIds[1] );
       glBufferData( GL_ARRAY_BUFFER, 4 * sizeof(struct VertexDataFormat), vData, GL_DYNAMIC_DRAW );
-      glBindBuffer( GL_ELEMENT_ARRAY_BUFFER, ebo );
+      glBindBuffer( GL_ELEMENT_ARRAY_BUFFER, gEBOId );
       UTIL_LogSetPrelude("[PASS 2] ");
       gProgramIds[1] = compileProgram(plain_glsl_vert, plain_glsl_frag_overlay, 1);
       setupShaderParams(1);
       
-      glBindVertexArray(gVAOIds[2]);
+      if(VAOSupported) glBindVertexArray(gVAOIds[2]);
       glBindBuffer( GL_ARRAY_BUFFER, gVBOIds[2] );
       glBufferData( GL_ARRAY_BUFFER, 4 * sizeof(struct VertexDataFormat), vData, GL_DYNAMIC_DRAW );
-      glBindBuffer( GL_ELEMENT_ARRAY_BUFFER, ebo );
+      glBindBuffer( GL_ELEMENT_ARRAY_BUFFER, gEBOId );
       UTIL_LogSetPrelude("[PASS 3] ");
       gProgramIds[2] = compileProgram(plain_glsl_vert, plain_glsl_frag, 1);
       setupShaderParams(2);
 
       UTIL_LogSetPrelude(NULL);
 
-      glBindVertexArray(0);
+      if(VAOSupported) glBindVertexArray(0);
    }else
 #  endif //PAL_HAS_GLSL
    SDL_SetHint(SDL_HINT_RENDER_SCALE_QUALITY, gConfig.pszScaleQuality);
