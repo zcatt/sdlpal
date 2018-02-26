@@ -734,7 +734,7 @@ VIDEO_Startup(
    SDL_GL_SetAttribute(SDL_GL_FRAMEBUFFER_SRGB_CAPABLE, 1);
 # endif
 
-# if __EMSCRIPTEN__ || __ANDROID__
+# if __EMSCRIPTEN__ || __ANDROID__ || MGL_SUPPORT_OPENGL_ON_METAL
    manualSRGB = 1;
 # endif
 
@@ -795,7 +795,7 @@ VIDEO_Startup(
          UTIL_LogOutput(LOGLEVEL_DEBUG, "GL_EXTENSIONS:%s\n",glGetString(GL_EXTENSIONS));
 
 // both iOS/ANGLE emulated GLES2 supports VAO extension
-#if __ANDROID__
+#if __ANDROID__ || MGL_SUPPORT_OPENGL_ON_METAL
        if(!strncmp(glversion, "OpenGL ES", 9)) {
            SDL_sscanf(glversion, "OpenGL ES %d.%d", &glversion_major, &glversion_minor);
            if( glversion_major <= 2)
