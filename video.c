@@ -33,20 +33,24 @@ static SDL_Palette       *gpPalette          = NULL;
 
 #if SDL_VERSION_ATLEAST(2,0,0)
 SDL_Window               *gpWindow           = NULL;
-static SDL_Renderer      *gpRenderer         = NULL;
-static SDL_Texture       *gpTexture          = NULL;
-static SDL_Texture       *gpTouchOverlay     = NULL;
-static SDL_Rect           gOverlayRect;
-static SDL_Rect           gTextureRect;
-static SDL_Rect           gGLTextureRect;
-int gRendererWidth;
-int gRendererHeight;
+SDL_Renderer      *gpRenderer         = NULL;
+SDL_Texture       *gpTexture          = NULL;
+SDL_Texture       *gpTouchOverlay     = NULL;
+SDL_Rect           gOverlayRect;
+SDL_Rect           gTextureRect;
+
+static struct RenderBackend {
+    void (*Init)();
+    void (*Setup)();
+    SDL_Texture *(*CreateTexture)(int width, int height);
+    void (*RenderCopy)();
+} gRenderBackend;
 #else
 #undef PAL_HAS_GLSL
 #endif
 
 // The real screen surface
-static SDL_Surface       *gpScreenReal       = NULL;
+SDL_Surface       *gpScreenReal       = NULL;
 
 volatile BOOL g_bRenderPaused = FALSE;
 
@@ -56,577 +60,28 @@ static BOOL bScaleScreen = PAL_SCALE_SCREEN;
 static WORD               g_wShakeTime       = 0;
 static WORD               g_wShakeLevel      = 0;
 
-#define FORCE_OPENGL_CORE_PROFILE 1
-
 #if PAL_HAS_GLSL
-static uint32_t gProgramIds[]={-1,-1,-1};
-static uint32_t gVAOIds[3]; // 0 for game screen; 1 for touch overlay; 2 for final blit
-static uint32_t gVBOIds[3];
-static uint32_t gEBOId;
-static uint32_t gPassID = -1;
-static int gMVPSlots[3], gTextureSizeSlots[3], gHDRSlot[3], gSRGBSlot[3];
-static int manualSRGB = 0;
-static int VAOSupported = 1;
-static int glversion_major, glversion_minor;
-static SDL_Texture *gpBackBuffer;
-
-#if __IOS__
-#include <SDL_opengles.h>
-#include <SDL_opengles2.h>
-#include <OpenGLES/ES3/gl.h>
-#include <OpenGLES/ES3/glext.h>
-#define glGenVertexArrays glGenVertexArraysOES
-#define glBindVertexArray glBindVertexArrayOES
-#else
-#ifdef __APPLE__
-#define GL_GLEXT_PROTOTYPES
+#include "video_glsl.h"
 #endif
-#include <SDL_opengl.h>
-#endif
-
-#if __IOS__ || __ANDROID__ || __EMSCRIPTEN__ || __WINRT__
-#define GLES 1
-#undef FORCE_OPENGL_CORE_PROFILE
-#endif
-
-#if !defined(__APPLE__)
-
-// I'm avoiding the use of GLEW or some extensions handler, but that 
-// doesn't mean you should...
-PFNGLCREATESHADERPROC glCreateShader;
-PFNGLSHADERSOURCEPROC glShaderSource;
-PFNGLCOMPILESHADERPROC glCompileShader;
-PFNGLGETSHADERIVPROC glGetShaderiv;
-PFNGLGETSHADERINFOLOGPROC glGetShaderInfoLog;
-PFNGLDELETESHADERPROC glDeleteShader;
-PFNGLATTACHSHADERPROC glAttachShader;
-PFNGLCREATEPROGRAMPROC glCreateProgram;
-PFNGLLINKPROGRAMPROC glLinkProgram;
-PFNGLVALIDATEPROGRAMPROC glValidateProgram;
-PFNGLGETPROGRAMIVPROC glGetProgramiv;
-PFNGLGETPROGRAMINFOLOGPROC glGetProgramInfoLog;
-PFNGLUSEPROGRAMPROC glUseProgram;
-PFNGLGENVERTEXARRAYSPROC glGenVertexArrays;
-PFNGLBINDVERTEXARRAYPROC glBindVertexArray;
-PFNGLGENBUFFERSPROC glGenBuffers;
-PFNGLBINDBUFFERPROC glBindBuffer;
-PFNGLBUFFERDATAPROC glBufferData;
-PFNGLBUFFERSUBDATAPROC glBufferSubData;
-PFNGLGETATTRIBLOCATIONPROC glGetAttribLocation;
-PFNGLENABLEVERTEXATTRIBARRAYPROC glEnableVertexAttribArray;
-PFNGLVERTEXATTRIBPOINTERPROC glVertexAttribPointer;
-PFNGLUNIFORMMATRIX4FVPROC glUniformMatrix4fv;
-PFNGLUNIFORM2FVPROC glUniform2fv;
-PFNGLUNIFORM1IVPROC glUniform1iv;
-PFNGLGETUNIFORMLOCATIONPROC glGetUniformLocation;
-PFNGLBINDFRAGDATALOCATIONPROC glBindFragDataLocation;
-PFNGLGETSTRINGIPROC glGetStringi;
-
-int initGLExtensions() {
-	glCreateShader = (PFNGLCREATESHADERPROC)SDL_GL_GetProcAddress("glCreateShader");
-	glShaderSource = (PFNGLSHADERSOURCEPROC)SDL_GL_GetProcAddress("glShaderSource");
-	glCompileShader = (PFNGLCOMPILESHADERPROC)SDL_GL_GetProcAddress("glCompileShader");
-	glGetShaderiv = (PFNGLGETSHADERIVPROC)SDL_GL_GetProcAddress("glGetShaderiv");
-	glGetShaderInfoLog = (PFNGLGETSHADERINFOLOGPROC)SDL_GL_GetProcAddress("glGetShaderInfoLog");
-	glDeleteShader = (PFNGLDELETESHADERPROC)SDL_GL_GetProcAddress("glDeleteShader");
-	glAttachShader = (PFNGLATTACHSHADERPROC)SDL_GL_GetProcAddress("glAttachShader");
-	glCreateProgram = (PFNGLCREATEPROGRAMPROC)SDL_GL_GetProcAddress("glCreateProgram");
-	glLinkProgram = (PFNGLLINKPROGRAMPROC)SDL_GL_GetProcAddress("glLinkProgram");
-	glValidateProgram = (PFNGLVALIDATEPROGRAMPROC)SDL_GL_GetProcAddress("glValidateProgram");
-	glGetProgramiv = (PFNGLGETPROGRAMIVPROC)SDL_GL_GetProcAddress("glGetProgramiv");
-	glGetProgramInfoLog = (PFNGLGETPROGRAMINFOLOGPROC)SDL_GL_GetProcAddress("glGetProgramInfoLog");
-	glUseProgram = (PFNGLUSEPROGRAMPROC)SDL_GL_GetProcAddress("glUseProgram");
-	glGenVertexArrays = (PFNGLGENVERTEXARRAYSPROC)SDL_GL_GetProcAddress("glGenVertexArrays");
-	glBindVertexArray = (PFNGLBINDVERTEXARRAYPROC)SDL_GL_GetProcAddress("glBindVertexArray");
-	glGenBuffers = (PFNGLGENBUFFERSPROC)SDL_GL_GetProcAddress("glGenBuffers");
-	glBindBuffer = (PFNGLBINDBUFFERPROC)SDL_GL_GetProcAddress("glBindBuffer");
-	glBufferData = (PFNGLBUFFERDATAPROC)SDL_GL_GetProcAddress("glBufferData");
-	glBufferSubData = (PFNGLBUFFERSUBDATAPROC)SDL_GL_GetProcAddress("glBufferSubData");
-	glGetAttribLocation = (PFNGLGETATTRIBLOCATIONPROC)SDL_GL_GetProcAddress("glGetAttribLocation");
-	glEnableVertexAttribArray = (PFNGLENABLEVERTEXATTRIBARRAYPROC)SDL_GL_GetProcAddress("glEnableVertexAttribArray");
-	glVertexAttribPointer = (PFNGLVERTEXATTRIBPOINTERPROC)SDL_GL_GetProcAddress("glVertexAttribPointer");
-    glUniformMatrix4fv = (PFNGLUNIFORMMATRIX4FVPROC)SDL_GL_GetProcAddress("glUniformMatrix4fv");
-    glUniform2fv = (PFNGLUNIFORM2FVPROC)SDL_GL_GetProcAddress("glUniform2fv");
-	glUniform1iv = (PFNGLUNIFORM1IVPROC)SDL_GL_GetProcAddress("glUniform1iv");
-    glGetUniformLocation = (PFNGLGETUNIFORMLOCATIONPROC)SDL_GL_GetProcAddress("glGetUniformLocation");
-#if !GLES
-    glBindFragDataLocation = (PFNGLBINDFRAGDATALOCATIONPROC)SDL_GL_GetProcAddress("glBindFragDataLocation") ;
-    glGetStringi = (PFNGLGETSTRINGIPROC)SDL_GL_GetProcAddress("glGetStringi") ;
-#endif
-
-	return glCreateShader && glShaderSource && glCompileShader && glGetShaderiv && 
-		glGetShaderInfoLog && glDeleteShader && glAttachShader && glCreateProgram &&
-		glLinkProgram && glValidateProgram && glGetProgramiv && glGetProgramInfoLog &&
-		glUseProgram && glGenBuffers &&
-        glBindBuffer && glBufferData && glBufferSubData && glGetAttribLocation &&
-        glEnableVertexAttribArray && glVertexAttribPointer && glUniformMatrix4fv;
-}
-
-#endif
-
-#define GetError( )\
-{\
-for ( GLenum Error = glGetError( ); ( GL_NO_ERROR != Error ); Error = glGetError( ) )\
-{\
-switch ( Error )\
-{\
-case GL_INVALID_ENUM:      UTIL_LogOutput(LOGLEVEL_DEBUG,  "%s\n", "GL_INVALID_ENUM"      ); assert( 0 ); break;\
-case GL_INVALID_VALUE:     UTIL_LogOutput(LOGLEVEL_DEBUG,  "%s\n", "GL_INVALID_VALUE"     ); assert( 0 ); break;\
-case GL_INVALID_OPERATION: UTIL_LogOutput(LOGLEVEL_DEBUG,  "%s\n", "GL_INVALID_OPERATION" ); assert( 0 ); break;\
-case GL_OUT_OF_MEMORY:     UTIL_LogOutput(LOGLEVEL_DEBUG,  "%s\n", "GL_OUT_OF_MEMORY"     ); assert( 0 ); break;\
-default:                                                                              break;\
-}\
-}\
-}
-struct AttrTexCoord
-{
-    GLfloat s;
-    GLfloat t;
-    GLfloat u;
-    GLfloat v;
-};
-struct AttrVertexPos
-{
-    GLfloat x;
-    GLfloat y;
-    GLfloat z;
-    GLfloat w;
-};
-struct VertexDataFormat
-{
-    struct AttrVertexPos position;
-    struct AttrTexCoord texCoord;
-};
-#pragma pack(push,16)
-union _GLKMatrix4
-{
-    struct
-    {
-        float m00, m01, m02, m03;
-        float m10, m11, m12, m13;
-        float m20, m21, m22, m23;
-        float m30, m31, m32, m33;
-    };
-    float m[16];
-};
-#pragma pack(pop)
-typedef union _GLKMatrix4 GLKMatrix4;
-
-static GLKMatrix4 gOrthoMatrixes[3];
-
-GLKMatrix4 GLKMatrix4MakeOrtho(float left, float right,
-                                          float bottom, float top,
-                                          float nearZ, float farZ)
-{
-    float ral = right + left;
-    float rsl = right - left;
-    float tab = top + bottom;
-    float tsb = top - bottom;
-    float fan = farZ + nearZ;
-    float fsn = farZ - nearZ;
-    
-    GLKMatrix4 m = { 2.0f / rsl, 0.0f, 0.0f, 0.0f,
-        0.0f, 2.0f / tsb, 0.0f, 0.0f,
-        0.0f, 0.0f, -2.0f / fsn, 0.0f,
-        -ral / rsl, -tab / tsb, -fan / fsn, 1.0f };
-    
-    return m;
-}
-
-
-static char *plain_glsl_vert = "\r\n\
-#if __VERSION__ >= 130              \r\n\
-#define COMPAT_VARYING out          \r\n\
-#define COMPAT_ATTRIBUTE in         \r\n\
-#define COMPAT_TEXTURE texture      \r\n\
-#else                               \r\n\
-#define COMPAT_VARYING varying      \r\n\
-#define COMPAT_ATTRIBUTE attribute  \r\n\
-#define COMPAT_TEXTURE texture2D    \r\n\
-#endif                              \r\n\
-#ifdef GL_ES                        \r\n\
-#define COMPAT_PRECISION mediump    \r\n\
-#else                               \r\n\
-#define COMPAT_PRECISION            \r\n\
-#endif                              \r\n\
-uniform mat4 MVPMatrix;             \r\n\
-COMPAT_ATTRIBUTE vec4 VertexCoord;  \r\n\
-COMPAT_ATTRIBUTE vec4 TexCoord;     \r\n\
-COMPAT_VARYING vec2 v_texCoord;     \r\n\
-void main()                         \r\n\
-{                                   \r\n\
-gl_Position = MVPMatrix * VertexCoord; \r\n\
-v_texCoord = TexCoord.xy;              \r\n\
-}";
-static char *plain_glsl_frag = "\r\n\
-#if __VERSION__ >= 130              \r\n\
-#define COMPAT_VARYING in           \r\n\
-#define COMPAT_TEXTURE texture      \r\n\
-out vec4 FragColor;                 \r\n\
-#else                               \r\n\
-#define COMPAT_VARYING varying      \r\n\
-#define FragColor gl_FragColor      \r\n\
-#define COMPAT_TEXTURE texture2D    \r\n\
-#endif                              \r\n\
-#ifdef GL_ES                        \r\n\
-#ifdef GL_FRAGMENT_PRECISION_HIGH   \r\n\
-precision highp float;              \r\n\
-#else                               \r\n\
-precision mediump float;            \r\n\
-#endif                              \r\n\
-#define COMPAT_PRECISION mediump    \r\n\
-#else                               \r\n\
-#define COMPAT_PRECISION            \r\n\
-#endif                              \r\n\
-COMPAT_VARYING vec2 v_texCoord;     \r\n\
-uniform sampler2D tex0;             \r\n\
-uniform int HDR;                    \r\n\
-uniform int sRGB;                    \r\n\
-vec3 ACESFilm(vec3 x)				\r\n\
-{									\r\n\
-	const float A = 2.51;			\r\n\
-	const float B = 0.03;			\r\n\
-	const float C = 2.43;			\r\n\
-	const float D = 0.59;			\r\n\
-	const float E = 0.14;			\r\n\
-	return (x * (A * x + B)) / (x * (C * x + D) + E); \r\n\
-}									\r\n\
-const float SRGB_ALPHA = 0.055;		\r\n\
-float linear_to_srgb(float channel) {\r\n\
-	if(channel <= 0.0031308)		\r\n\
-		return 12.92 * channel;		\r\n\
-	else							\r\n\
-		return (1.0 + SRGB_ALPHA) * pow(channel, 1.0/2.4) - SRGB_ALPHA;	\r\n\
-}									\r\n\
-vec3 rgb_to_srgb(vec3 rgb) {		\r\n\
-	return vec3(linear_to_srgb(rgb.r), linear_to_srgb(rgb.g), linear_to_srgb(rgb.b)	); \r\n\
-}									\r\n\
-float srgb_to_linear(float channel) {	\r\n\
-	if (channel <= 0.04045)				\r\n\
-		return channel / 12.92;			\r\n\
-	else								\r\n\
-		return pow((channel + SRGB_ALPHA) / (1.0 + SRGB_ALPHA), 2.4);	\r\n\
-}									\r\n\
-vec3 srgb_to_rgb(vec3 srgb) {		\r\n\
-	return vec3(srgb_to_linear(srgb.r),	srgb_to_linear(srgb.g),	srgb_to_linear(srgb.b));\r\n\
-}\r\n\
-void main()                         \r\n\
-{                                   \r\n\
-FragColor = vec4(srgb_to_rgb(COMPAT_TEXTURE(tex0 , v_texCoord.xy).rgb), 1.0);  \r\n\
-#ifdef GL_ES                        \r\n\
-FragColor.rgb = FragColor.bgr;   	\r\n\
-#endif                              \r\n\
-vec3 color = FragColor.rgb;			\r\n\
-if( HDR > 0 )						\r\n\
-	color = ACESFilm(color);        \r\n\
-if( sRGB > 0 )                      \r\n\
-    color = rgb_to_srgb(color);     \r\n\
-FragColor.rgb=color; \r\n\
-}";
-static char *plain_glsl_frag_overlay = "\r\n\
-#if __VERSION__ >= 130              \r\n\
-#define COMPAT_VARYING in           \r\n\
-#define COMPAT_TEXTURE texture      \r\n\
-out vec4 FragColor;                 \r\n\
-#else                               \r\n\
-#define COMPAT_VARYING varying      \r\n\
-#define FragColor gl_FragColor      \r\n\
-#define COMPAT_TEXTURE texture2D    \r\n\
-#endif                              \r\n\
-#ifdef GL_ES                        \r\n\
-#ifdef GL_FRAGMENT_PRECISION_HIGH   \r\n\
-precision highp float;              \r\n\
-#else                               \r\n\
-precision mediump float;            \r\n\
-#endif                              \r\n\
-#define COMPAT_PRECISION mediump    \r\n\
-#else                               \r\n\
-#define COMPAT_PRECISION            \r\n\
-#endif                              \r\n\
-COMPAT_VARYING vec2 v_texCoord;     \r\n\
-uniform sampler2D tex0;             \r\n\
-void main()                         \r\n\
-{                                   \r\n\
-FragColor = vec4(COMPAT_TEXTURE(tex0 , v_texCoord.xy).rgb, 1.0);  \r\n\
-float sat = (FragColor.r+FragColor.g+FragColor.b)/3.0; \r\n\
-vec3 average = vec3(sat,sat,sat);    \r\n\
-FragColor.rgb -= average*0.7;               \r\n\
-#ifdef GL_ES                        \r\n\
-FragColor.rgb = FragColor.rgb;      \r\n\
-#endif                              \r\n\
-}";
-
-char *readShaderFile(const char *fileName, GLuint type) {
-   FILE *fp = UTIL_OpenRequiredFile(fileName);
-   fseek(fp,0,SEEK_END);
-   long filesize = ftell(fp);
-   char *buf = (char*)malloc(filesize+1);
-   fseek(fp,0,SEEK_SET);
-   fread(buf,filesize,1,fp);
-   buf[filesize]='\0';
-   return buf;
-}
-
-GLuint compileShader(const char* sourceOrFilename, GLuint shaderType, int is_source) {
-//DONT CHANGE
-#define SHADER_TYPE(shaderType) (shaderType == GL_VERTEX_SHADER ? "VERTEX" : "FRAGMENT")
-    char shaderBuffer[65536];
-    const char *pBuf = shaderBuffer;
-    memset(shaderBuffer,0,sizeof(shaderBuffer));
-    const char *source = sourceOrFilename;
-    if(!is_source)
-        source = readShaderFile(sourceOrFilename, shaderType);
-#if !GLES
-    sprintf(shaderBuffer,"%s\r\n",glversion_major>3 ? "#version 330" : "#version 110");
-#endif
-    sprintf(shaderBuffer+strlen(shaderBuffer),"#define %s\r\n%s\r\n",SHADER_TYPE(shaderType),source);
-    if(!is_source)
-        free((void*)source);
-   
-    // Create ID for shader
-    GLuint result = glCreateShader(shaderType);
-    // Define shader text
-    glShaderSource(result, 1, &pBuf, NULL);
-    // Compile shader
-    glCompileShader(result);
-    
-    //Check vertex shader for errors
-    GLint shaderCompiled = GL_FALSE;
-    glGetShaderiv( result, GL_COMPILE_STATUS, &shaderCompiled );
-    if( shaderCompiled != GL_TRUE ) {
-        GLint logLength;
-        glGetShaderiv(result, GL_INFO_LOG_LENGTH, &logLength);
-        if (logLength > 0)
-        {
-            GLchar *log = (GLchar*)malloc(logLength);
-            glGetShaderInfoLog(result, logLength, &logLength, log);
-            UTIL_LogOutput(LOGLEVEL_DEBUG, "shader %s compilation error:%s\n", is_source ? "stock" : sourceOrFilename,log);
-            free(log);
-        }
-        glDeleteShader(result);
-        result = 0;
-    }else
-       UTIL_LogOutput(LOGLEVEL_DEBUG, "%s shader %s compilation succeed!\n", SHADER_TYPE(shaderType), is_source ? "stock" : sourceOrFilename );
-    return result;
-}
-
-GLuint compileProgram(const char* vtx, const char* frag,int is_source) {
-    GLuint programId = 0;
-    GLuint vtxShaderId, fragShaderId;
-    programId = glCreateProgram();
-    
-    vtxShaderId = compileShader(vtx, GL_VERTEX_SHADER, is_source);
-    
-    fragShaderId = compileShader(frag, GL_FRAGMENT_SHADER, is_source);
-    
-    if(vtxShaderId && fragShaderId) {
-        // Associate shader with program
-        glAttachShader(programId, vtxShaderId);
-        glAttachShader(programId, fragShaderId);
-        glLinkProgram(programId);
-        glValidateProgram(programId);
-        
-        // Check the status of the compile/link
-        GLint logLen;
-        glGetProgramiv(programId, GL_INFO_LOG_LENGTH, &logLen);
-        if(logLen > 0) {
-            char* log = (char*) malloc(logLen * sizeof(char));
-            // Show any errors as appropriate
-            glGetProgramInfoLog(programId, logLen, &logLen, log);
-            UTIL_LogOutput(LOGLEVEL_DEBUG, "shader linkage error:%s\n",log);
-            free(log);
-        }else
-           UTIL_LogOutput(LOGLEVEL_DEBUG, "shaders linkage succeed!\n");
-    }
-    if(vtxShaderId) {
-        glDeleteShader(vtxShaderId);
-    }
-    if(fragShaderId) {
-        glDeleteShader(fragShaderId);
-    }
-    return programId;
-}
-
-void setupShaderParams(int pass){
-   int slot = glGetAttribLocation(gProgramIds[pass], "VertexCoord");
-   if(slot >= 0) {
-      glEnableVertexAttribArray(slot);
-      glVertexAttribPointer(slot, 4, GL_FLOAT, GL_FALSE, sizeof(struct VertexDataFormat), (GLvoid*)offsetof(struct VertexDataFormat, position));
-   }else{
-      UTIL_LogOutput(LOGLEVEL_DEBUG, "attrib VertexCoord not exist\n");
-   }
-   
-   slot = glGetAttribLocation(gProgramIds[pass], "TexCoord");
-   if(slot >= 0) {
-      glEnableVertexAttribArray(slot);
-      glVertexAttribPointer(slot, 4, GL_FLOAT, GL_FALSE, sizeof(struct VertexDataFormat), (GLvoid*)offsetof(struct VertexDataFormat, texCoord));
-   }else{
-      UTIL_LogOutput(LOGLEVEL_DEBUG, "attrib TexCoord not exist\n");
-   }
-   
-   gMVPSlots[pass] = glGetUniformLocation(gProgramIds[pass], "MVPMatrix");
-   if(gMVPSlots[pass] < 0)
-      UTIL_LogOutput(LOGLEVEL_DEBUG, "uniform MVPMatrix not exist\n");
-   
-   gTextureSizeSlots[pass] = glGetUniformLocation(gProgramIds[pass], "TextureSize");
-   if(gTextureSizeSlots[pass] < 0)
-      UTIL_LogOutput(LOGLEVEL_DEBUG, "uniform TextureSize not exist\n");
-
-   gHDRSlot[pass] = glGetUniformLocation(gProgramIds[pass], "HDR");
-   if(gHDRSlot[pass] < 0)
-      UTIL_LogOutput(LOGLEVEL_DEBUG, "uniform HDR not exist\n");
-
-   gSRGBSlot[pass] = glGetUniformLocation(gProgramIds[pass], "sRGB");
-   if(gSRGBSlot[pass] < 0)
-      UTIL_LogOutput(LOGLEVEL_DEBUG, "uniform sRGB not exist\n");
-}
-
-int VIDEO_RenderTexture(SDL_Renderer * renderer, SDL_Texture * texture, const SDL_Rect * srcrect, const SDL_Rect * dstrect, int pass)
-{
-   GLint oldProgramId;
-   GLfloat minx, miny, maxx, maxy;
-   GLfloat minu, maxu, minv, maxv;
-   
-   GLfloat texw;
-   GLfloat texh;
-   SDL_GL_BindTexture(texture, &texw, &texh);
-    
-#ifndef GL_ES_VERSION_3_0
-   if(!manualSRGB)
-	   glEnable(GL_FRAMEBUFFER_SRGB);
-#endif
-
-   if(gProgramIds[pass] != -1) {
-      glGetIntegerv(GL_CURRENT_PROGRAM,&oldProgramId);
-      glUseProgram(gProgramIds[pass]);
-   }
-   
-   // Setup MVP projection matrix uniform
-   glUniformMatrix4fv(gMVPSlots[pass], 1, GL_FALSE, gOrthoMatrixes[pass].m);
-   
-   GLfloat textureSize[2];
-   textureSize[0] = 320.0;
-   textureSize[1] = 200.0;
-   glUniform2fv(gTextureSizeSlots[pass], 1, textureSize);
-	
-   GLint HDR = gConfig.fEnableHDR;
-   glUniform1iv(gHDRSlot[pass], 1, &HDR);
-
-   glUniform1iv(gSRGBSlot[pass], 1, &manualSRGB);
-
-   SDL_Rect _srcrect,_dstrect;
-   
-   int w, h;
-   SDL_QueryTexture(texture, NULL, NULL, &w, &h);
-   
-   if(!srcrect) {
-      srcrect = &_srcrect;
-      _srcrect.x = 0;
-      _srcrect.y = 0;
-      _srcrect.w = w;
-      _srcrect.h = h;
-   }
-   if(!dstrect) {
-      dstrect = &_dstrect;
-      _dstrect.x = 0;
-      _dstrect.y = 0;
-      _dstrect.w = gRendererWidth;
-      _dstrect.h = gRendererHeight;
-   }
-   
-   minx = dstrect->x;
-   miny = dstrect->y;
-   maxx = dstrect->x + dstrect->w;
-   maxy = dstrect->y + dstrect->h;
-   
-   minu = (GLfloat) srcrect->x / srcrect->w;
-   maxu = (GLfloat) (srcrect->x + srcrect->w) / srcrect->w;
-   minv = (GLfloat) srcrect->y / srcrect->h;
-   maxv = (GLfloat) (srcrect->y + srcrect->h) / srcrect->h;
-
-   minu *= texw;
-   maxu *= texw;
-   minv *= texh;
-   maxv *= texh;
-   
-   struct VertexDataFormat vData[ 4 ];
-   
-   //Texture coordinates
-   vData[ 0 ].texCoord.s =  minu; vData[ 0 ].texCoord.t = minv; vData[ 0 ].texCoord.u = 0.0; vData[ 0 ].texCoord.v = 0.0;
-   vData[ 1 ].texCoord.s =  maxu; vData[ 1 ].texCoord.t = minv; vData[ 1 ].texCoord.u = 0.0; vData[ 1 ].texCoord.v = 0.0;
-   vData[ 2 ].texCoord.s =  maxu; vData[ 2 ].texCoord.t = maxv; vData[ 2 ].texCoord.u = 0.0; vData[ 2 ].texCoord.v = 0.0;
-   vData[ 3 ].texCoord.s =  minu; vData[ 3 ].texCoord.t = maxv; vData[ 3 ].texCoord.u = 0.0; vData[ 3 ].texCoord.v = 0.0;
-   
-   //Vertex positions
-   vData[ 0 ].position.x = minx; vData[ 0 ].position.y = miny; vData[ 0 ].position.z = 0.0; vData[ 0 ].position.w = 1.0;
-   vData[ 1 ].position.x = maxx; vData[ 1 ].position.y = miny; vData[ 1 ].position.z = 0.0; vData[ 1 ].position.w = 1.0;
-   vData[ 2 ].position.x = maxx; vData[ 2 ].position.y = maxy; vData[ 2 ].position.z = 0.0; vData[ 2 ].position.w = 1.0;
-   vData[ 3 ].position.x = minx; vData[ 3 ].position.y = maxy; vData[ 3 ].position.z = 0.0; vData[ 3 ].position.w = 1.0;
-   
-   if(VAOSupported) glBindVertexArray(gVAOIds[pass]);
-   
-   //Update vertex buffer data
-   glBindBuffer( GL_ARRAY_BUFFER, gVBOIds[pass] );
-   glBufferSubData( GL_ARRAY_BUFFER, 0, 4 * sizeof(struct VertexDataFormat), vData );
-
-   if(!VAOSupported) glBindBuffer( GL_ELEMENT_ARRAY_BUFFER, gEBOId );
-	
-   //Draw quad using vertex data and index data
-   glDrawElements( GL_TRIANGLE_STRIP, 4, GL_UNSIGNED_INT, NULL );
-
-   if(VAOSupported) glBindVertexArray(0);
-	
-   if(!VAOSupported) {
-      glBindBuffer( GL_ARRAY_BUFFER, 0 );
-      glBindBuffer( GL_ELEMENT_ARRAY_BUFFER, 0 );
-   }
-	
-   if(gProgramIds[pass] != -1) {
-      glUseProgram(oldProgramId);
-   }
-   
-   return 0;
-}
-
-//remove all fixed pipeline call in RenderCopy
-
-int CORE_SetupCopy(SDL_Renderer * renderer, SDL_Texture * texture)
-{
-   //setup shader
-   return 0;
-}
-
-int orig_SDL_RenderCopy(SDL_Renderer * renderer, SDL_Texture * texture,
-                    const SDL_Rect * srcrect, const SDL_Rect * dstrect)
-{
-   return SDL_RenderCopy(renderer, texture, srcrect, dstrect);
-}
-#define SDL_RenderCopy CORE_RenderCopy
-int CORE_RenderCopy(SDL_Renderer * renderer, SDL_Texture * texture,
-                    const SDL_Rect * srcrect, const SDL_Rect * dstrect)
-{
-   if(!gConfig.fEnableGLSL)
-      return orig_SDL_RenderCopy(renderer, texture, srcrect, dstrect);
-
-   return VIDEO_RenderTexture(renderer, texture, srcrect, dstrect, gPassID);
-}
-
-#endif //PAL_HAS_GLSL
 
 #if SDL_VERSION_ATLEAST(2, 0, 0)
+void VIDEO_SetupTouchArea(int window_w, int window_h, int draw_w, int draw_h)
+{
+	gOverlayRect.x = (window_w - draw_w) / 2;
+	gOverlayRect.y = (window_h - draw_h) / 2;
+	gOverlayRect.w = draw_w;
+	gOverlayRect.h = draw_h;
+#if PAL_HAS_TOUCH
+	PAL_SetTouchBounds(window_w, window_h, gOverlayRect);
+#endif
+}
+
 #define SDL_SoftStretch SDL_UpperBlit
 static SDL_Texture *VIDEO_CreateTexture(int width, int height)
 {
 	int texture_width, texture_height;
-    double ratio = (float)width / (float)height;
-    ratio *= 1.6f * (float)gConfig.dwTextureHeight / (float)gConfig.dwTextureWidth;
-    double ratioV;
-   
-#if PAL_HAS_GLSL
-   gOrthoMatrixes[0] = GLKMatrix4MakeOrtho(0, width, height, 0, -1, 1);
-   gOrthoMatrixes[1] = GLKMatrix4MakeOrtho(0, width, height, 0, -1, 1);
-   gOrthoMatrixes[2] = GLKMatrix4MakeOrtho(0, width, 0, height, -1, 1);
-#endif
+	double ratio = (double)width / (double)height;
+	ratio *= 1.6f * (double)gConfig.dwTextureHeight / (float)gConfig.dwTextureWidth;
 	//
 	// Check whether to keep the aspect ratio
 	//
@@ -637,47 +92,30 @@ static SDL_Texture *VIDEO_CreateTexture(int width, int height)
 			texture_height = 200;
 			texture_width = (int)(200 * ratio) & ~0x3;
 			ratio = (float)height / 200.0f;
-            ratioV = (float)height / gConfig.dwTextureHeight;
 		}
 		else
 		{
 			texture_width = 320;
 			texture_height = (int)(320 / ratio) & ~0x3;
 			ratio = (float)width / 320.0f;
-            ratioV = (float)width / gConfig.dwTextureWidth;
 		}
 
 		WORD w = (WORD)(ratio * 320.0f) & ~0x3;
 		WORD h = (WORD)(ratio * 200.0f) & ~0x3;
-		gOverlayRect.x = (width - w) / 2;
-		gOverlayRect.y = (height - h) / 2;
-		gOverlayRect.w = w;
-		gOverlayRect.h = h;
 		gTextureRect.x = (texture_width - 320) / 2;
 		gTextureRect.y = (texture_height - 200) / 2;
 		gTextureRect.w = 320; gTextureRect.h = 200;
-       
-        w = (WORD)(ratioV * gConfig.dwTextureWidth) & ~0x3;
-        h = (WORD)(ratioV * gConfig.dwTextureHeight) & ~0x3;
-        gGLTextureRect.x = (width - w) / 2;
-        gGLTextureRect.y = (height - h) / 2;
-        gGLTextureRect.w = w; gGLTextureRect.h = h;
-#if PAL_HAS_TOUCH
-		PAL_SetTouchBounds(width, height, gOverlayRect);
-#endif
+		
+		VIDEO_SetupTouchArea(width,height,w,h);
 	}
 	else
 	{
 		texture_width = 320;
 		texture_height = 200;
-		gOverlayRect.x = gOverlayRect.y = 0;
-		gOverlayRect.w = width;
-		gOverlayRect.h = height;
 		gTextureRect.x = gTextureRect.y = 0;
 		gTextureRect.w = 320; gTextureRect.h = 200;
-       
-        gGLTextureRect.x = gGLTextureRect.y = 0;
-        gGLTextureRect.w = width; gGLTextureRect.h = height;
+		
+		VIDEO_SetupTouchArea(width,height,width,height);
 	}
 
 	//
@@ -686,6 +124,8 @@ static SDL_Texture *VIDEO_CreateTexture(int width, int height)
 	return SDL_CreateTexture(gpRenderer, SDL_PIXELFORMAT_ARGB8888, SDL_TEXTUREACCESS_STREAMING, texture_width, texture_height);
 }
 #endif
+
+void NullFunc() {}
 
 INT
 VIDEO_Startup(
@@ -708,152 +148,39 @@ VIDEO_Startup(
 --*/
 {
 #if SDL_VERSION_ATLEAST(2,0,0)
-   
-   if( gConfig.fEnableGLSL) {
-#if GLES
-   SDL_SetHint( SDL_HINT_RENDER_DRIVER, "opengles2");
-#else
-#  if PAL_HAS_GLSL
-   SDL_SetHint( SDL_HINT_RENDER_DRIVER, "opengl");
-#     if FORCE_OPENGL_CORE_PROFILE
-   SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 3);
-   SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 2);
-   SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_CORE);
-#     endif
-#  endif
-#endif
-   }
+   int render_w, render_h;
 
 #if PAL_HAS_GLSL
-   //
-   // iOS need this line to enable color correction
-   // WebGL will not crash with sRGB capable, but will not work with it too.
-   // after several tests, Android completely unable to initial video with sRGB framebuffer capability requested, and MAY CRASH on extension detection.
-   //
-# if !__ANDROID__
-   SDL_GL_SetAttribute(SDL_GL_FRAMEBUFFER_SRGB_CAPABLE, 1);
-# endif
-
-# if __EMSCRIPTEN__ || __ANDROID__ || MGL_SUPPORT_OPENGL_ON_METAL
-   manualSRGB = 1;
-# endif
-
+   if( gConfig.fEnableGLSL) {
+	   gRenderBackend.Init = VIDEO_GLSL_Init;
+	   gRenderBackend.Setup = VIDEO_GLSL_Setup;
+	   gRenderBackend.CreateTexture = VIDEO_GLSL_CreateTexture;
+	   gRenderBackend.RenderCopy = VIDEO_GLSL_RenderCopy;
+   }else
 #endif
+   {
+	   gRenderBackend.Init = NullFunc;
+	   gRenderBackend.Setup = NullFunc;
+	   gRenderBackend.CreateTexture = VIDEO_CreateTexture;
+	   gRenderBackend.RenderCopy = VIDEO_RenderCopy;
+   }
+	
+   gRenderBackend.Init();
 
    //
    // Before we can render anything, we need a window and a renderer.
    //
    gpWindow = SDL_CreateWindow("Pal", SDL_WINDOWPOS_UNDEFINED, SDL_WINDOWPOS_UNDEFINED,
-                               gConfig.dwScreenWidth, gConfig.dwScreenHeight, PAL_VIDEO_INIT_FLAGS | (gConfig.fFullScreen ? SDL_WINDOW_BORDERLESS : 0) );
+                               gConfig.dwScreenWidth, gConfig.dwScreenHeight, PAL_VIDEO_INIT_FLAGS | (gConfig.fFullScreen ? SDL_WINDOW_BORDERLESS : 0) | (gConfig.fEnableGLSL ? SDL_WINDOW_OPENGL : 0));
 
    if (gpWindow == NULL)
    {
-      UTIL_LogOutput(LOGLEVEL_DEBUG, "CreateWindow failed, reason:%s\n", SDL_GetError());
       return -1;
    }
 
    gpRenderer = SDL_CreateRenderer(gpWindow, -1, SDL_RENDERER_ACCELERATED | SDL_RENDERER_PRESENTVSYNC);
-   SDL_GetRendererOutputSize(gpRenderer, &gRendererWidth, &gRendererHeight);
-#  if PAL_HAS_GLSL
-   if( gConfig.fEnableGLSL) {
-      SDL_SetHint(SDL_HINT_RENDER_SCALE_QUALITY, gConfig.pszScaleQuality);
-      gpBackBuffer = SDL_CreateTexture(gpRenderer, SDL_PIXELFORMAT_ARGB8888, SDL_TEXTUREACCESS_TARGET, gConfig.dwTextureWidth, gConfig.dwTextureHeight);
-      SDL_SetHint(SDL_HINT_RENDER_SCALE_QUALITY, "0");
-      SDL_RendererInfo rendererInfo;
-      SDL_GetRendererInfo(gpRenderer, &rendererInfo);
-      
-      UTIL_LogOutput(LOGLEVEL_DEBUG, "render info:%s\n",rendererInfo.name);
-      if(!strncmp(rendererInfo.name, "opengl", 6)) {
-#     ifndef __APPLE__
-         // If you want to use GLEW or some other GL extension handler, do it here!
-         if (!initGLExtensions()) {
-            UTIL_LogOutput(LOGLEVEL_DEBUG,  "Couldn't init GL extensions!\n" );
-            SDL_Quit();
-            exit(-1);
-         }
-#     endif
-      }
-      char *glversion = (char*)glGetString(GL_VERSION);
-      UTIL_LogOutput(LOGLEVEL_DEBUG, "GL_VERSION:%s\n",glversion);
-      UTIL_LogOutput(LOGLEVEL_DEBUG, "GL_SHADING_LANGUAGE_VERSION:%s\n",glGetString(GL_SHADING_LANGUAGE_VERSION));
-      UTIL_LogOutput(LOGLEVEL_DEBUG, "GL_RENDERER:%s\n",glGetString(GL_RENDERER));
-      GLint maxTextureSize, maxDrawBuffers, maxColorAttachments;
-      glGetIntegerv(GL_MAX_TEXTURE_SIZE, &maxTextureSize);
-      glGetIntegerv(GL_MAX_DRAW_BUFFERS, &maxDrawBuffers);
-      glGetIntegerv(GL_MAX_COLOR_ATTACHMENTS, &maxColorAttachments);
-      UTIL_LogOutput(LOGLEVEL_DEBUG, "GL_MAX_TEXTURE_SIZE:%d\n",maxTextureSize);
-      UTIL_LogOutput(LOGLEVEL_DEBUG, "GL_MAX_DRAW_BUFFERS:%d\n",maxDrawBuffers);
-      UTIL_LogOutput(LOGLEVEL_DEBUG, "GL_MAX_COLOR_ATTACHMENTS:%d\n",maxColorAttachments);
-      SDL_sscanf(glversion, "%d.%d", &glversion_major, &glversion_minor);
-      if( glversion_major >= 3 ) {
-         GLint n, i;
-         glGetIntegerv(GL_NUM_EXTENSIONS, &n);
-         for (i = 0; i < n; i++) {
-            UTIL_LogOutput(LOGLEVEL_DEBUG, "extension %d:%s\n", i, glGetStringi(GL_EXTENSIONS, i));
-         }
-      }else
-         UTIL_LogOutput(LOGLEVEL_DEBUG, "GL_EXTENSIONS:%s\n",glGetString(GL_EXTENSIONS));
 
-// both iOS/ANGLE emulated GLES2 supports VAO extension
-#if __ANDROID__ || MGL_SUPPORT_OPENGL_ON_METAL
-       if(!strncmp(glversion, "OpenGL ES", 9)) {
-           SDL_sscanf(glversion, "OpenGL ES %d.%d", &glversion_major, &glversion_minor);
-           if( glversion_major <= 2)
-               VAOSupported = 0;
-       }
-#endif
-
-      struct VertexDataFormat vData[ 4 ];
-      GLuint iData[ 4 ];
-      //Set rendering indices
-      iData[ 0 ] = 0;
-      iData[ 1 ] = 1;
-      iData[ 2 ] = 3;
-      iData[ 3 ] = 2;
-	   
-	   if(VAOSupported) {
-      // Initialize vertex array object
-      glGenVertexArrays(3, gVAOIds);
-      glBindVertexArray(gVAOIds[0]);
-	   }
-      
-      UTIL_LogSetPrelude("[PASS 1] ");
-      gProgramIds[0] = compileProgram(gConfig.pszShader,gConfig.pszShader, 0);
-      
-      //Create VBO
-      glGenBuffers( 3, gVBOIds );
-      glBindBuffer( GL_ARRAY_BUFFER, gVBOIds[0] );
-      glBufferData( GL_ARRAY_BUFFER, 4 * sizeof(struct VertexDataFormat), vData, GL_DYNAMIC_DRAW );
-      
-      //Create IBO
-      glGenBuffers( 1, &gEBOId );
-      glBindBuffer( GL_ELEMENT_ARRAY_BUFFER, gEBOId );
-      glBufferData( GL_ELEMENT_ARRAY_BUFFER, 4 * sizeof(GLuint), iData, GL_DYNAMIC_DRAW );
-      
-      setupShaderParams(0);
-      
-      if(VAOSupported) glBindVertexArray(gVAOIds[1]);
-      glBindBuffer( GL_ARRAY_BUFFER, gVBOIds[1] );
-      glBufferData( GL_ARRAY_BUFFER, 4 * sizeof(struct VertexDataFormat), vData, GL_DYNAMIC_DRAW );
-      glBindBuffer( GL_ELEMENT_ARRAY_BUFFER, gEBOId );
-      UTIL_LogSetPrelude("[PASS 2] ");
-      gProgramIds[1] = compileProgram(plain_glsl_vert, plain_glsl_frag_overlay, 1);
-      setupShaderParams(1);
-      
-      if(VAOSupported) glBindVertexArray(gVAOIds[2]);
-      glBindBuffer( GL_ARRAY_BUFFER, gVBOIds[2] );
-      glBufferData( GL_ARRAY_BUFFER, 4 * sizeof(struct VertexDataFormat), vData, GL_DYNAMIC_DRAW );
-      glBindBuffer( GL_ELEMENT_ARRAY_BUFFER, gEBOId );
-      UTIL_LogSetPrelude("[PASS 3] ");
-      gProgramIds[2] = compileProgram(plain_glsl_vert, plain_glsl_frag, 1);
-      setupShaderParams(2);
-
-      UTIL_LogSetPrelude(NULL);
-
-      if(VAOSupported) glBindVertexArray(0);
-   }else
-#  endif //PAL_HAS_GLSL
-   SDL_SetHint(SDL_HINT_RENDER_SCALE_QUALITY, gConfig.pszScaleQuality);
+   gRenderBackend.Setup();
 
    if (gpRenderer == NULL)
    {
@@ -876,7 +203,8 @@ VIDEO_Startup(
    //
    // Create texture for screen.
    //
-   gpTexture = VIDEO_CreateTexture(gRendererWidth, gRendererHeight);
+   SDL_GetRendererOutputSize(gpRenderer, &render_w, &render_h);
+   gpTexture = gRenderBackend.CreateTexture(render_w, render_h);
 
    //
    // Create palette object
@@ -1012,14 +340,6 @@ VIDEO_Shutdown(
    }
    gpTexture = NULL;
 
-#if PAL_HAS_GLSL
-   if (gpBackBuffer)
-   {
-      SDL_DestroyTexture(gpBackBuffer);
-   }
-   gpBackBuffer = NULL;
-#endif
-
    if (gpRenderer)
    {
       SDL_DestroyRenderer(gpRenderer);
@@ -1047,35 +367,11 @@ VIDEO_Shutdown(
 }
 
 #if SDL_VERSION_ATLEAST(2,0,0)
-PAL_FORCE_INLINE
 VOID
 VIDEO_RenderCopy(
    VOID
 )
 {
-#if PAL_HAS_GLSL
-   if( gConfig.fEnableGLSL) {
-      SDL_SetRenderTarget(gpRenderer, gpBackBuffer);
-      SDL_RenderClear(gpRenderer);
-      SDL_Texture *screenTexture = SDL_CreateTextureFromSurface(gpRenderer, gpScreenReal);
-      gPassID = 0;
-      SDL_RenderCopy(gpRenderer, screenTexture, NULL, &gGLTextureRect);
-      SDL_DestroyTexture(screenTexture);
-      SDL_SetRenderTarget(gpRenderer, NULL);
-      SDL_RenderClear(gpRenderer);
-      
-      gPassID = 2;
-      SDL_RenderCopy(gpRenderer, gpBackBuffer, NULL, NULL);
-      if (gpTouchOverlay)
-      {
-         glEnable(GL_BLEND);
-         glBlendFunc(GL_SRC_ALPHA, GL_ONE);
-         gPassID = 1;
-         SDL_RenderCopy(gpRenderer, gpTouchOverlay, NULL, &gOverlayRect);
-      }
-      SDL_GL_SwapWindow(gpWindow);
-   }else{
-#endif
 	void *texture_pixels;
 	int texture_pitch;
 
@@ -1100,11 +396,8 @@ VIDEO_RenderCopy(
 		SDL_RenderCopy(gpRenderer, gpTouchOverlay, NULL, &gOverlayRect);
 	}
 	SDL_RenderPresent(gpRenderer);
-#if PAL_HAS_GLSL
-    }
-#endif
 }
-#endif //SDL2
+#endif
 
 VOID
 VIDEO_UpdateScreen(
@@ -1224,7 +517,7 @@ VIDEO_UpdateScreen(
    }
 
 #if SDL_VERSION_ATLEAST(2,0,0)
-   VIDEO_RenderCopy();
+   gRenderBackend.RenderCopy();
 #else
    SDL_UpdateRect(gpScreenReal, dstrect.x, dstrect.y, dstrect.w, dstrect.h);
 #endif
@@ -1317,8 +610,6 @@ VIDEO_Resize(
 --*/
 {
 #if SDL_VERSION_ATLEAST(2,0,0)
-   gRendererWidth = w;
-   gRendererHeight = h;
    SDL_Rect rect;
 
    if (gpTexture)
@@ -1326,7 +617,7 @@ VIDEO_Resize(
       SDL_DestroyTexture(gpTexture);
    }
 
-   gpTexture = VIDEO_CreateTexture(w, h);
+   gpTexture = gRenderBackend.CreateTexture(w, h);
 
    if (gpTexture == NULL)
    {
@@ -1707,7 +998,7 @@ VIDEO_SwitchScreen(
 
       SDL_SoftStretch(gpScreenBak, NULL, gpScreenReal, &dstrect);
 #if SDL_VERSION_ATLEAST(2, 0, 0)
-      VIDEO_RenderCopy();
+      gRenderBackend.RenderCopy();
 #else
       SDL_UpdateRect(gpScreenReal, 0, 0, gpScreenReal->w, gpScreenReal->h);
 #endif
@@ -1850,7 +1141,7 @@ VIDEO_FadeScreen(
 
             SDL_FillRect(gpScreenReal, &dstrect, 0);
 #if SDL_VERSION_ATLEAST(2, 0, 0)
-            VIDEO_RenderCopy();
+            gRenderBackend.RenderCopy();
 #else
 			SDL_UpdateRect(gpScreenReal, 0, 0, gpScreenReal->w, gpScreenReal->h);
 #endif
@@ -1865,7 +1156,7 @@ VIDEO_FadeScreen(
 
             SDL_SoftStretch(gpScreenBak, NULL, gpScreenReal, &dstrect);
 #if SDL_VERSION_ATLEAST(2, 0, 0)
-            VIDEO_RenderCopy();
+            gRenderBackend.RenderCopy();
 #else
             SDL_UpdateRect(gpScreenReal, 0, 0, gpScreenReal->w, gpScreenReal->h);
 #endif
@@ -2045,7 +1336,7 @@ VIDEO_DrawSurfaceToScreen(
       return;
    }
    SDL_BlitScaled(pSurface, NULL, gpScreenReal, NULL);
-   VIDEO_RenderCopy();
+   gRenderBackend.RenderCopy();
 #else
    SDL_Surface   *pCompatSurface;
    SDL_Rect       rect;

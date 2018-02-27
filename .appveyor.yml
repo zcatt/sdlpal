@@ -1,6 +1,6 @@
 version: 2.0.{build}
 image:
-  - Visual Studio 2015
+  - Visual Studio 2017
 skip_commits:
   files:
     - '*.md'
@@ -33,6 +33,9 @@ build_script:
 before_build:
   - |-
     git submodule update --init --recursive
+    cd winrt 
+    nuget restore SDLPal.UWP.sln 
+    cd ..
 after_build:
   - |-
     if exist win32\Win32\Release\sdlpal.exe ( cd win32\Win32\Release & 7z a ..\..\..\sdlpal-win32.zip sdlpal.exe & cd ..\..\..\ )

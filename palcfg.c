@@ -487,7 +487,7 @@ PAL_LoadConfig(
 	}
     
     if(gConfig.fEnableGLSL && !gConfig.pszShader)
-        gConfig.pszShader = values[PALCFG_SHADER].sValue;
+        gConfig.pszShader = (char*)values[PALCFG_SHADER].sValue;
 }
 
 

@@ -368,6 +368,8 @@
     <ClCompile Include="..\uigame.c" />
     <ClCompile Include="..\util.c" />
     <ClCompile Include="..\video.c" />
+    <ClCompile Include="..\video_glsl.c" />
+    <ClCompile Include="..\mini_glloader.c" />
     <ClCompile Include="..\yj1.c" />
     <ClCompile Include="..\adplug\binfile.cpp" />
     <ClCompile Include="..\adplug\binio.cpp" />

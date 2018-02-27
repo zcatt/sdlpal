@@ -399,6 +399,12 @@
     <ClInclude Include="..\..\riff.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="..\..\..\..\..\..\..\..\Workspace\sdlpal\video_glsl.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\..\..\..\..\..\..\Workspace\sdlpal\mini_glloader.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="..\..\adplug\binfile.cpp">
@@ -651,6 +657,12 @@
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="..\..\aviplay.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\..\..\..\..\..\..\Workspace\sdlpal\video_glsl.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\..\..\..\..\..\..\Workspace\sdlpal\mini_glloader.c">
       <Filter>Source Files</Filter>
     </ClCompile>
   </ItemGroup>

@@ -64,6 +64,10 @@
 
 #define strcasestr(a,b) strstr(_strupr((a)),_strupr((b)))
 
+#if WINAPI_FAMILY != WINAPI_FAMILY_PHONE_APP
+#define PAL_HAS_GLSL 1
+#endif
+
 PAL_C_LINKAGE_BEGIN
 
 LPCSTR
