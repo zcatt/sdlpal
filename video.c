@@ -32,6 +32,8 @@ SDL_Surface              *gpScreenBak        = NULL;
 static SDL_Palette       *gpPalette          = NULL;
 
 bool mutex_rendering = false;
+// Debug layer buffer
+SDL_Surface              *gpDebugLayer       = NULL;
 
 #if SDL_VERSION_ATLEAST(2,0,0)
 SDL_Window               *gpWindow           = NULL;
@@ -202,6 +204,8 @@ VIDEO_Startup(
    gpScreenReal = SDL_CreateRGBSurface(SDL_SWSURFACE, 320, 200, 32,
                                        0x00FF0000, 0x0000FF00, 0x000000FF, 0xFF000000);
 
+   gpDebugLayer = SDL_CreateRGBSurface(SDL_SWSURFACE, gConfig.dwScreenWidth, gConfig.dwScreenHeight, 8, 0, 0, 0, 0);
+	
    //
    // Create texture for screen.
    //
@@ -556,6 +560,56 @@ VIDEO_UpdateScreen(
    }
 }
 
+#define PAL_MAX_DEBUG 20
+
+struct DebugEntry {
+	wchar_t content[PAL_MAX_PATH];
+	PAL_POS pos;
+	int leaving_frames;
+};
+static struct DebugEntry DebugEntries[PAL_MAX_DEBUG];
+static int debugEntryCount;
+
+void DEBUG_AddEntry(wchar_t *str, PAL_POS pos, int frames) {
+	struct DebugEntry x = { L"", pos, frames };
+	wcscpy(x.content, str);
+	int loc = -1;
+	for( int i = 0; i < debugEntryCount; i++)
+		if(DebugEntries[i].pos == pos)
+			loc = i;
+	if( loc == -1 )
+		DebugEntries[debugEntryCount++] = x;
+	else
+		DebugEntries[loc] = x;
+}
+static void DEBUG_Compact() {
+	int valids[20],total=0,step=0;
+	memset(valids,0,sizeof(valids));
+	for( int i = 0; i < debugEntryCount; i++)
+		if(DebugEntries[i].leaving_frames)
+			valids[i]=1,total++;
+	for( int i = 0; i < total; i++)
+		if(valids[i]==0) {
+			int j = step;
+			for(; j < debugEntryCount; j++)
+				if(valids[j]==1)
+					break;
+			DebugEntries[i]=DebugEntries[j];
+		}
+	debugEntryCount = total;
+}
+static void DEBUG_Flush() {
+	if(!gConfig.fEnableDebugLayer)
+		return;
+	
+	SDL_FillRect(gpDebugLayer, NULL, 0);
+	for( int i = 0; i < debugEntryCount; i++) {
+		PAL_DrawTextOnSurface(DebugEntries[i].content, DebugEntries[i].pos, 0x0F, 0, 0, 1, gpDebugLayer);
+		DebugEntries[i].leaving_frames--;
+	}
+	DEBUG_Compact();
+}
+
 #if SDL_VERSION_ATLEAST(2, 0, 0)
 VOID VIDEO_DrawFrame() {
 	static int frames = 0;
@@ -563,10 +617,15 @@ VOID VIDEO_DrawFrame() {
 	if( mutex_rendering == true )
 		return;
 	DWORD before = SDL_GetTicks();
-	if( lastFrameTime != 0)
-		UTIL_LogOutput(LOGLEVEL_DEBUG, "FPS:%.1f\n",1000.0f/(before-lastFrameTime));
+	if( lastFrameTime != 0) {
+		double fps = 1000.0f/(before-lastFrameTime);
+		DEBUG_AddEntry(PAL_vaw(L"%06.02fFPS",fps), PAL_XY(0, 0), 1);
+	}
 	lastFrameTime = before;
 	frames++;
+
+	DEBUG_Flush();
+	
 	gRenderBackend.RenderCopy();
 
 	double frameEstimateTime;
@@ -601,6 +660,8 @@ VIDEO_SetPalette(
 
    SDL_SetSurfacePalette(gpScreen, gpPalette);
    SDL_SetSurfacePalette(gpScreenBak, gpPalette);
+
+	SDL_SetSurfacePalette(gpDebugLayer, gpPalette);
 
    //
    // HACKHACK: need to invalidate gpScreen->map otherwise the palette

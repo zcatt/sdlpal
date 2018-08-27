@@ -975,12 +975,26 @@ PAL_GetMsgNum(
 
 VOID
 PAL_DrawText(
+LPCWSTR    lpszText,
+PAL_POS    pos,
+BYTE       bColor,
+BOOL       fShadow,
+BOOL       fUpdate,
+BOOL       fUse8x8Font
+)
+{
+   PAL_DrawTextOnSurface( lpszText, pos, bColor, fShadow, fUpdate, fUse8x8Font, gpScreen);
+}
+
+VOID
+PAL_DrawTextOnSurface(
    LPCWSTR    lpszText,
    PAL_POS    pos,
    BYTE       bColor,
    BOOL       fShadow,
    BOOL       fUpdate,
-   BOOL       fUse8x8Font
+   BOOL       fUse8x8Font,
+   SDL_Surface *pSurface
 )
 /*++
   Purpose:
@@ -999,7 +1013,9 @@ PAL_DrawText(
 
     [IN]  fUpdate - TRUE if update the screen area.
 
-	[IN]  fUse8x8Font - TRUE if use 8x8 font.
+    [IN]  fUse8x8Font - TRUE if use 8x8 font.
+
+    [IN]  pSurface - the surface that blitting to.
 
   Return value:
 
@@ -1026,10 +1042,10 @@ PAL_DrawText(
 
       if (fShadow)
       {
-		  PAL_DrawCharOnSurface(*lpszText, gpScreen, PAL_XY(rect.x + 1, rect.y + 1), 0, fUse8x8Font);
-		  PAL_DrawCharOnSurface(*lpszText, gpScreen, PAL_XY(rect.x + 1, rect.y), 0, fUse8x8Font);
+		  PAL_DrawCharOnSurface(*lpszText, pSurface, PAL_XY(rect.x + 1, rect.y + 1), 0, fUse8x8Font);
+		  PAL_DrawCharOnSurface(*lpszText, pSurface, PAL_XY(rect.x + 1, rect.y), 0, fUse8x8Font);
       }
-	  PAL_DrawCharOnSurface(*lpszText++, gpScreen, PAL_XY(rect.x, rect.y), bColor, fUse8x8Font);
+	  PAL_DrawCharOnSurface(*lpszText++, pSurface, PAL_XY(rect.x, rect.y), bColor, fUse8x8Font);
 	  rect.x += char_width; urect.w += char_width;
    }
 
@@ -2341,7 +2357,7 @@ PAL_swprintf(
 
 				// Convert or copy string (char) into output buffer
 				if (*format == 's' && !wide)
-					PAL_MultiByteToWideChar((LPCSTR)buf, -1, buffer, precision);
+					PAL_MultiByteToWideChar((LPCSTR)buf, len, buffer, precision);
 				else
 					wcsncpy(buffer, buf, precision);
 				buffer += precision; count += precision;

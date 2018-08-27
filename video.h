@@ -154,6 +154,8 @@ VIDEO_SetupTouchArea(
     int draw_h
 );
 
+void DEBUG_AddEntry(wchar_t *str, PAL_POS pos, int frames);
+
 PAL_C_LINKAGE_END
 
 #endif

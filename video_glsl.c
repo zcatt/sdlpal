@@ -30,6 +30,9 @@ extern SDL_Texture       *gpTouchOverlay;
 extern SDL_Rect           gOverlayRect;
 extern SDL_Rect           gTextureRect;
 
+extern SDL_Surface       *gpDebugLayer;
+SDL_Texture              *gpDebugOverlay;
+
 extern bool mutex_rendering;
 
 static int gRendererWidth;
@@ -39,7 +42,13 @@ static uint32_t gProgramIds[MAX_INDEX]={-1};
 static uint32_t gVAOIds[MAX_INDEX];
 static uint32_t gVBOIds[MAX_INDEX];
 static uint32_t gEBOId;
-static int gMVPSlots[MAX_INDEX], gHDRSlot=-1, gSRGBSlot=-1, gTouchOverlaySlot=-1;
+static int gMVPSlots[MAX_INDEX];
+static int gHDRSlot=-1;
+static int gSRGBSlot=-1;
+static int gTouchOverlaySlot=-1;
+static int gDebugOverlaySlot = -1;
+static int gFlipHackSlot = 0;
+static GLint flipHack = -1;
 static int manualSRGB = 0;
 static int VAOSupported = 1;
 static int glversion_major, glversion_minor;
@@ -179,6 +188,8 @@ uniform sampler2D tex0;             \r\n\
 uniform int HDR;                    \r\n\
 uniform int sRGB;                   \r\n\
 uniform sampler2D TouchOverlay;     \r\n\
+uniform sampler2D DebugOverlay;     \r\n\
+uniform int fliphack;               \r\n\
 vec3 ACESFilm(vec3 x)               \r\n\
 {                                   \r\n\
 const float A = 2.51;               \r\n\
@@ -207,11 +218,16 @@ return pow((channel + SRGB_ALPHA) / (1.0 + SRGB_ALPHA), 2.4);    \r\n\
 vec3 srgb_to_rgb(vec3 srgb) {       \r\n\
 return vec3(srgb_to_linear(srgb.r),    srgb_to_linear(srgb.g),    srgb_to_linear(srgb.b));\r\n\
 }\r\n\
-vec4 blend(vec4 src, vec4 dst){     \r\n\
+vec4 touch_blend(vec4 src, vec4 dst){     \r\n\
 float sat = (dst.r+dst.g+dst.b)/3.0;\r\n\
 vec3 average = vec3(sat,sat,sat);   \r\n\
 dst.rgb -= average*0.8;             \r\n\
 dst.a=0.5;                          \r\n\
+vec4 sfactor = vec4(1,1,1,1);       \r\n\
+vec4 dfactor = vec4(1,1,1,1);       \r\n\
+return src*sfactor+dst*dfactor;     \r\n\
+}\r\n\
+vec4 blend(vec4 src, vec4 dst){     \r\n\
 vec4 sfactor = vec4(1,1,1,1);       \r\n\
 vec4 dfactor = vec4(1,1,1,1);       \r\n\
 return src*sfactor+dst*dfactor;     \r\n\
@@ -229,7 +245,8 @@ color = ACESFilm(color);            \r\n\
 if( sRGB > 0 )                      \r\n\
 color = rgb_to_srgb(color);         \r\n\
 FragColor.rgb=color;                \r\n\
-FragColor = blend(FragColor, COMPAT_TEXTURE(TouchOverlay , v_texCoord.xy));     \r\n\
+FragColor = touch_blend(FragColor, COMPAT_TEXTURE(TouchOverlay , v_texCoord.xy));     \r\n\
+FragColor = blend(FragColor, COMPAT_TEXTURE(DebugOverlay , fliphack > 0 ? v_texCoord.xy : vec2(v_texCoord.x, 1.0-v_texCoord.y)));     \r\n\
 }";
 
 static char *glslp_template = "\r\n\
@@ -433,6 +450,12 @@ static void setupShaderParams(int pass){
         gTouchOverlaySlot = glGetUniformLocation(gProgramIds[pass], "TouchOverlay");
         if(gTouchOverlaySlot < 0)
             UTIL_LogOutput(LOGLEVEL_DEBUG, "uniform TouchOverlay not exist\n");
+        
+        gDebugOverlaySlot = glGetUniformLocation(gProgramIds[pass], "DebugOverlay");
+        if(gDebugOverlaySlot < 0)
+            UTIL_LogOutput(LOGLEVEL_DEBUG, "uniform DebugOverlay not exist\n");
+        
+        gFlipHackSlot = glGetUniformLocation(gProgramIds[pass], "fliphack");
     }
 }
 
@@ -552,10 +575,15 @@ static int GLSL_RenderTexture(SDL_Renderer * renderer, SDL_Texture * texture, co
     
     int texture_unit_used = 1;
     int touchoverlay_texture_slot = -1;
+    int debugoverlay_texture_slot = -1;
     if( pass == 0 ) {
         glActiveTexture(GL_TEXTURE0+texture_unit_used);
         SDL_GL_BindTexture(gpTouchOverlay, NULL, NULL);
         touchoverlay_texture_slot = texture_unit_used++;
+        
+        glActiveTexture(GL_TEXTURE0+texture_unit_used);
+        SDL_GL_BindTexture(gpDebugOverlay, NULL, NULL);
+        debugoverlay_texture_slot = texture_unit_used++;
     }
     if( pass >= 1 ) {
         //global
@@ -610,6 +638,8 @@ static int GLSL_RenderTexture(SDL_Renderer * renderer, SDL_Texture * texture, co
         glUniform1i(gHDRSlot, HDR);
         glUniform1i(gSRGBSlot, manualSRGB);
         glUniform1i(gTouchOverlaySlot, touchoverlay_texture_slot);
+        glUniform1i(gDebugOverlaySlot, debugoverlay_texture_slot);
+        glUniform1i(gFlipHackSlot, flipHack);
     }
 
     //global
@@ -740,6 +770,7 @@ SDL_Texture *VIDEO_GLSL_CreateTexture(int width, int height)
         gOrthoMatrixes[i] = GLKMatrix4MakeOrtho(0, width, 0, height, -1, 1);
     //hack!
     if( strstr(gConfig.pszShader,"metacrt.glslp") == NULL)
+        flipHack=1,
     gOrthoMatrixes[0] = GLKMatrix4MakeOrtho(0, width, height, 0, -1, 1);
 
     //
@@ -833,6 +864,9 @@ SDL_Texture *VIDEO_GLSL_CreateTexture(int width, int height)
 
 void VIDEO_GLSL_RenderCopy()
 {
+    if( mutex_rendering )
+        return;
+    
     mutex_rendering = true;
     
     gpTexture = framePrevTextures[0]; //...
@@ -846,6 +880,8 @@ void VIDEO_GLSL_RenderCopy()
     SDL_GL_BindTexture(origTexture, NULL, NULL);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, get_gl_wrap_mode(gGLSLP.shader_params[0].wrap_mode, gGLSLP.shader_params[0].scale_type_x));
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, get_gl_wrap_mode(gGLSLP.shader_params[0].wrap_mode, gGLSLP.shader_params[0].scale_type_y));
+    
+    gpDebugOverlay = SDL_CreateTextureFromSurface(gpRenderer, gpDebugLayer);
 
     SDL_Texture *prevTexture = origTexture;
     int passID = 1;
@@ -1132,13 +1168,13 @@ void Filter_StepParamSlot(int step) {
         return;
     slot = (gGLSLP.uniform_parameters + slot + step) % gGLSLP.uniform_parameters;
     uniform_param *param = &gGLSLP.uniform_params[slot];
-    UTIL_LogOutput(LOGLEVEL_INFO, "[PARAM] slot:%s cur:%.2f range:[%.2f,%.2f]\n", param->parameter_name, param->value, param->minimum, param->maximum);
+    DEBUG_AddEntry(PAL_vaw(L"[PARAM] slot:%s cur:%.2f range:[%.2f,%.2f]\n", param->parameter_name, param->value, param->minimum, param->maximum), PAL_XY(0,gConfig.dwScreenHeight-50), 60*5);
 }
 void Filter_StepCurrentParam(int step) {
     if( !gConfig.fEnableGLSL || gGLSLP.uniform_parameters <= 0 )
         return;
     uniform_param *param = &gGLSLP.uniform_params[slot];
     param->value = CLAMP( param->value + step * param->step, param->minimum, param->maximum);
-    UTIL_LogOutput(LOGLEVEL_INFO, "[PARAM] slot:%s cur:%.2f range:[%.2f,%.2f]\n", param->parameter_name, param->value, param->minimum, param->maximum);
+    DEBUG_AddEntry(PAL_vaw(L"[PARAM] slot:%s cur:%.2f range:[%.2f,%.2f]\n", param->parameter_name, param->value, param->minimum, param->maximum), PAL_XY(0,gConfig.dwScreenHeight-50), 60*5);
 }
 #endif
