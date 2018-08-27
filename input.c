@@ -1214,6 +1214,10 @@ PAL_ProcessEvent(
    g_InputState.joystickNeedUpdate = FALSE;
 #endif
    while (PAL_PollEvent(NULL));
+   
+#if SDL_VERSION_ATLEAST(2,0,0)
+   VIDEO_DrawFrame();
+#endif
 
    PAL_UpdateKeyboardState();
 #if PAL_HAS_JOYSTICKS

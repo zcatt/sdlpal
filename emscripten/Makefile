@@ -2,7 +2,7 @@
 # note: only works in chrome now, and audio not works now.
 
 TARGET = sdlpal.html
-EMFILES = sdlpal.{html,js,mem,data,bc,wast,wasm}
+EMFILES = sdlpal.{html,js,mem,data,bc,wast,wasm,wasm.map,asm.js,asm.js.map}
 EMPORTS = -s USE_SDL=2 -s USE_OGG=1 -s USE_VORBIS=1
 
 INTER=.emscripten

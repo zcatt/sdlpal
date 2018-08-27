@@ -58,6 +58,11 @@ VIDEO_UpdateScreen(
 );
 
 VOID
+VIDEO_DrawFrame(
+   VOID
+);
+
+VOID
 VIDEO_SetPalette(
    SDL_Color        rgPalette[256]
 );

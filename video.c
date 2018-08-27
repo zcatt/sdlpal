@@ -31,6 +31,8 @@ SDL_Surface              *gpScreenBak        = NULL;
 // The global palette
 static SDL_Palette       *gpPalette          = NULL;
 
+bool mutex_rendering = false;
+
 #if SDL_VERSION_ATLEAST(2,0,0)
 SDL_Window               *gpWindow           = NULL;
 SDL_Renderer      *gpRenderer         = NULL;
@@ -543,7 +545,7 @@ VIDEO_UpdateScreen(
    }
 
 #if SDL_VERSION_ATLEAST(2,0,0)
-   gRenderBackend.RenderCopy();
+//   gRenderBackend.RenderCopy();
 #else
    SDL_UpdateRect(gpScreenReal, dstrect.x, dstrect.y, dstrect.w, dstrect.h);
 #endif
@@ -553,6 +555,25 @@ VIDEO_UpdateScreen(
 	   SDL_UnlockSurface(gpScreenReal);
    }
 }
+
+#if SDL_VERSION_ATLEAST(2, 0, 0)
+VOID VIDEO_DrawFrame() {
+	static int frames = 0;
+	static DWORD lastFrameTime = 0;
+	if( mutex_rendering == true )
+		return;
+	DWORD before = SDL_GetTicks();
+	if( lastFrameTime != 0)
+		UTIL_LogOutput(LOGLEVEL_DEBUG, "FPS:%.1f\n",1000.0f/(before-lastFrameTime));
+	lastFrameTime = before;
+	frames++;
+	gRenderBackend.RenderCopy();
+
+	double frameEstimateTime;
+	DWORD after = SDL_GetTicks();
+	frameEstimateTime = after-before;
+}
+#endif
 
 VOID
 VIDEO_SetPalette(
