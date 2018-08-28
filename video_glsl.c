@@ -897,13 +897,14 @@ void VIDEO_GLSL_RenderCopy()
     SDL_RenderClear(gpRenderer);
     GLSL_RenderTexture(gpRenderer, prevTexture, NULL, &gTextureRect, passID++);
     SDL_DestroyTexture(origTexture);
-    
+
     SDL_SetRenderTarget(gpRenderer, NULL);
     SDL_RenderClear(gpRenderer);
     GLSL_RenderTexture(gpRenderer, gpTexture, NULL, NULL, 0);
     
     SDL_GL_SwapWindow(gpWindow);
-    
+    SDL_DestroyTexture(gpDebugOverlay);
+
     prevTexture = framePrevTextures[PREV_TEXTURES];
     for( int i = PREV_TEXTURES; i > 0; i-- )
         framePrevTextures[i] = framePrevTextures[i-1];
@@ -1168,13 +1169,13 @@ void Filter_StepParamSlot(int step) {
         return;
     slot = (gGLSLP.uniform_parameters + slot + step) % gGLSLP.uniform_parameters;
     uniform_param *param = &gGLSLP.uniform_params[slot];
-    DEBUG_AddEntry(PAL_vaw(L"[PARAM] slot:%s cur:%.2f range:[%.2f,%.2f]\n", param->parameter_name, param->value, param->minimum, param->maximum), PAL_XY(0,gConfig.dwScreenHeight-50), 60*5);
+    DEBUG_AddEntry(PAL_vaw(L"[PARAM] slot:%s cur:%.2f range:[%.2f,%.2f]\n", param->parameter_name, param->value, param->minimum, param->maximum), PAL_XY(0,gConfig.dwTextureHeight-20), 60*5);
 }
 void Filter_StepCurrentParam(int step) {
     if( !gConfig.fEnableGLSL || gGLSLP.uniform_parameters <= 0 )
         return;
     uniform_param *param = &gGLSLP.uniform_params[slot];
     param->value = CLAMP( param->value + step * param->step, param->minimum, param->maximum);
-    DEBUG_AddEntry(PAL_vaw(L"[PARAM] slot:%s cur:%.2f range:[%.2f,%.2f]\n", param->parameter_name, param->value, param->minimum, param->maximum), PAL_XY(0,gConfig.dwScreenHeight-50), 60*5);
+    DEBUG_AddEntry(PAL_vaw(L"[PARAM] slot:%s cur:%.2f range:[%.2f,%.2f]\n", param->parameter_name, param->value, param->minimum, param->maximum), PAL_XY(0,gConfig.dwTextureHeight-20), 60*5);
 }
 #endif

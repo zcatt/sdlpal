@@ -204,7 +204,7 @@ VIDEO_Startup(
    gpScreenReal = SDL_CreateRGBSurface(SDL_SWSURFACE, 320, 200, 32,
                                        0x00FF0000, 0x0000FF00, 0x000000FF, 0xFF000000);
 
-   gpDebugLayer = SDL_CreateRGBSurface(SDL_SWSURFACE, gConfig.dwScreenWidth, gConfig.dwScreenHeight, 8, 0, 0, 0, 0);
+   gpDebugLayer = SDL_CreateRGBSurface(SDL_SWSURFACE, gConfig.dwTextureWidth, gConfig.dwTextureHeight, 8, 0, 0, 0, 0);
 	
    //
    // Create texture for screen.
@@ -356,6 +356,12 @@ VIDEO_Shutdown(
       SDL_FreeSurface(gpScreenBak);
    }
    gpScreenBak = NULL;
+
+	if (gpDebugLayer != NULL)
+	{
+		SDL_FreeSurface(gpDebugLayer);
+	}
+	gpDebugLayer = NULL;
 
 #if SDL_VERSION_ATLEAST(2,0,0)
 
@@ -561,6 +567,7 @@ VIDEO_UpdateScreen(
 }
 
 #define PAL_MAX_DEBUG 20
+#define PAL_MIN_FPS_SCHEDULE 0.5f
 
 struct DebugEntry {
 	wchar_t content[PAL_MAX_PATH];
@@ -614,23 +621,24 @@ static void DEBUG_Flush() {
 VOID VIDEO_DrawFrame() {
 	static int frames = 0;
 	static DWORD lastFrameTime = 0;
+	DWORD before = SDL_GetTicks();
+	if( lastFrameTime == 0 )
+		lastFrameTime = before;
+	if( before - lastFrameTime > 1000*PAL_MIN_FPS_SCHEDULE ) {
+		double fps = 1000.0f/(before-lastFrameTime)*frames;
+		DEBUG_AddEntry(PAL_vaw(L"%6.1fFPS",fps), PAL_XY(0, 0), PAL_MIN_FPS_SCHEDULE*fps);
+		lastFrameTime = before;
+		frames = 0;
+	}
+
 	if( mutex_rendering == true )
 		return;
-	DWORD before = SDL_GetTicks();
-	if( lastFrameTime != 0) {
-		double fps = 1000.0f/(before-lastFrameTime);
-		DEBUG_AddEntry(PAL_vaw(L"%06.02fFPS",fps), PAL_XY(0, 0), 1);
-	}
-	lastFrameTime = before;
+
 	frames++;
 
 	DEBUG_Flush();
 	
 	gRenderBackend.RenderCopy();
-
-	double frameEstimateTime;
-	DWORD after = SDL_GetTicks();
-	frameEstimateTime = after-before;
 }
 #endif
 
@@ -1106,7 +1114,7 @@ VIDEO_SwitchScreen(
 
       SDL_SoftStretch(gpScreenBak, NULL, gpScreenReal, &dstrect);
 #if SDL_VERSION_ATLEAST(2, 0, 0)
-      gRenderBackend.RenderCopy();
+//      gRenderBackend.RenderCopy();
 #else
       SDL_UpdateRect(gpScreenReal, 0, 0, gpScreenReal->w, gpScreenReal->h);
 #endif
@@ -1249,7 +1257,7 @@ VIDEO_FadeScreen(
 
             SDL_FillRect(gpScreenReal, &dstrect, 0);
 #if SDL_VERSION_ATLEAST(2, 0, 0)
-            gRenderBackend.RenderCopy();
+//            gRenderBackend.RenderCopy();
 #else
 			SDL_UpdateRect(gpScreenReal, 0, 0, gpScreenReal->w, gpScreenReal->h);
 #endif
@@ -1264,7 +1272,7 @@ VIDEO_FadeScreen(
 
             SDL_SoftStretch(gpScreenBak, NULL, gpScreenReal, &dstrect);
 #if SDL_VERSION_ATLEAST(2, 0, 0)
-            gRenderBackend.RenderCopy();
+//            gRenderBackend.RenderCopy();
 #else
             SDL_UpdateRect(gpScreenReal, 0, 0, gpScreenReal->w, gpScreenReal->h);
 #endif
@@ -1444,7 +1452,7 @@ VIDEO_DrawSurfaceToScreen(
       return;
    }
    SDL_BlitScaled(pSurface, NULL, gpScreenReal, NULL);
-   gRenderBackend.RenderCopy();
+//   gRenderBackend.RenderCopy();
 #else
    SDL_Surface   *pCompatSurface;
    SDL_Rect       rect;
