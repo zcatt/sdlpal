@@ -115,7 +115,12 @@ PAL_Init(
 #else
 	   ""
 #endif
-       ,(gConfig.fEnableGLSL && gConfig.pszShader ? gConfig.pszShader : "")
+       ,
+#if PAL_HAS_GLSL
+       (gConfig.fEnableGLSL && gConfig.pszShader ? gConfig.pszShader : "")
+#else
+       ""
+#endif
    ));
 }
 
