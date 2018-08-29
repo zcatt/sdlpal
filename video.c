@@ -33,7 +33,7 @@ static SDL_Palette       *gpPalette          = NULL;
 
 bool mutex_rendering = false;
 // Debug layer buffer
-SDL_Surface              *gpDebugLayer       = NULL;
+SDL_Surface              *gpDebugLayer		   = NULL;
 
 #if SDL_VERSION_ATLEAST(2,0,0)
 SDL_Window               *gpWindow           = NULL;
@@ -42,6 +42,8 @@ SDL_Texture       *gpTexture          = NULL;
 SDL_Texture       *gpTouchOverlay     = NULL;
 SDL_Rect           gOverlayRect;
 SDL_Rect           gTextureRect;
+
+SDL_Texture              *gpDebugOverlay		= NULL;
 
 static struct RenderBackend {
     void (*Init)();
@@ -205,7 +207,9 @@ VIDEO_Startup(
                                        0x00FF0000, 0x0000FF00, 0x000000FF, 0xFF000000);
 
    gpDebugLayer = SDL_CreateRGBSurface(SDL_SWSURFACE, gConfig.dwTextureWidth, gConfig.dwTextureHeight, 8, 0, 0, 0, 0);
-	
+	gpDebugOverlay = SDL_CreateTexture(gpRenderer, SDL_PIXELFORMAT_ARGB8888, SDL_TEXTUREACCESS_STREAMING, gConfig.dwTextureWidth, gConfig.dwTextureHeight);
+	SDL_SetTextureBlendMode( gpDebugOverlay, SDL_BLENDMODE_ADD );
+
    //
    // Create texture for screen.
    //
@@ -371,6 +375,12 @@ VIDEO_Shutdown(
    }
    gpTouchOverlay = NULL;
 
+	if (gpDebugOverlay != NULL)
+	{
+		SDL_DestroyTexture(gpDebugOverlay);
+	}
+	gpDebugOverlay = NULL;
+
    if (gpTexture)
    {
 	  SDL_DestroyTexture(gpTexture);
@@ -432,6 +442,10 @@ VIDEO_RenderCopy(
 	if (gConfig.fUseTouchOverlay)
 	{
 		SDL_RenderCopy(gpRenderer, gpTouchOverlay, NULL, &gOverlayRect);
+	}
+	if (gConfig.fEnableDebugLayer)
+	{
+		SDL_RenderCopy(gpRenderer, gpDebugOverlay, NULL, NULL);
 	}
 	SDL_RenderPresent(gpRenderer);
 }
@@ -609,12 +623,41 @@ static void DEBUG_Flush() {
 	if(!gConfig.fEnableDebugLayer)
 		return;
 	
-	SDL_FillRect(gpDebugLayer, NULL, 0);
+	SDL_FillRect(gpDebugLayer, NULL, 0xFF);
 	for( int i = 0; i < debugEntryCount; i++) {
 		PAL_DrawTextOnSurface(DebugEntries[i].content, DebugEntries[i].pos, 0x0F, 0, 0, 1, gpDebugLayer);
 		DebugEntries[i].leaving_frames--;
 	}
 	DEBUG_Compact();
+
+	if (SDL_MUSTLOCK(gpDebugLayer))
+		SDL_LockSurface(gpDebugLayer);
+	void *texture_pixels;
+	int texture_pitch;
+	SDL_LockTexture(gpDebugOverlay, NULL, &texture_pixels, &texture_pitch);
+	memset(texture_pixels, 0, gpDebugLayer->h * texture_pitch);
+	uint8_t *pixels = (uint8_t *)texture_pixels;
+	uint8_t *src = (uint8_t *)gpDebugLayer->pixels;
+	int right_pitch = texture_pitch - (gpDebugLayer->w << 2);
+	for (int y = 0; y < gpDebugLayer->h; y++, src += gpDebugLayer->pitch)
+	{
+		for( int i = 0; i < gpDebugLayer->w; i++ ) {
+			int colorIndex = src[ i ];
+			if( colorIndex == 0xFF ) {
+				continue;
+			}
+			SDL_Color color = gpPalette->colors[ colorIndex ];
+			pixels[i*4+0] = color.r;
+			pixels[i*4+1] = color.g;
+			pixels[i*4+2] = color.b;
+			pixels[i*4+3] = 255;
+		}
+		pixels += (gpDebugLayer->w << 2);
+		memset(pixels, 0, right_pitch); pixels += right_pitch;
+	}
+	SDL_UnlockTexture(gpDebugOverlay);
+	if (SDL_MUSTLOCK(gpDebugLayer))
+		SDL_LockSurface(gpDebugLayer);
 }
 
 #if SDL_VERSION_ATLEAST(2, 0, 0)

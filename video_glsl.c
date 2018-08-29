@@ -31,7 +31,7 @@ extern SDL_Rect           gOverlayRect;
 extern SDL_Rect           gTextureRect;
 
 extern SDL_Surface       *gpDebugLayer;
-SDL_Texture              *gpDebugOverlay;
+extern SDL_Texture       *gpDebugOverlay;
 
 extern bool mutex_rendering;
 
@@ -47,7 +47,8 @@ static int gHDRSlot=-1;
 static int gSRGBSlot=-1;
 static int gTouchOverlaySlot=-1;
 static int gDebugOverlaySlot = -1;
-static int gFlipHackSlot = 0;
+static int gFlipHackSlot = -1;
+static int gDebugLayerSlot = -1;
 static GLint flipHack = -1;
 static int manualSRGB = 0;
 static int VAOSupported = 1;
@@ -190,6 +191,7 @@ uniform int sRGB;                   \r\n\
 uniform sampler2D TouchOverlay;     \r\n\
 uniform sampler2D DebugOverlay;     \r\n\
 uniform int fliphack;               \r\n\
+uniform int debuglayer;               \r\n\
 vec3 ACESFilm(vec3 x)               \r\n\
 {                                   \r\n\
 const float A = 2.51;               \r\n\
@@ -246,6 +248,7 @@ if( sRGB > 0 )                      \r\n\
 color = rgb_to_srgb(color);         \r\n\
 FragColor.rgb=color;                \r\n\
 FragColor = touch_blend(FragColor, COMPAT_TEXTURE(TouchOverlay , v_texCoord.xy));     \r\n\
+if(debuglayer > 0)                  \r\n\
 FragColor = blend(FragColor, COMPAT_TEXTURE(DebugOverlay , fliphack > 0 ? v_texCoord.xy : vec2(v_texCoord.x, 1.0-v_texCoord.y)));     \r\n\
 }";
 
@@ -456,6 +459,7 @@ static void setupShaderParams(int pass){
             UTIL_LogOutput(LOGLEVEL_DEBUG, "uniform DebugOverlay not exist\n");
         
         gFlipHackSlot = glGetUniformLocation(gProgramIds[pass], "fliphack");
+        gDebugLayerSlot = glGetUniformLocation(gProgramIds[pass], "debuglayer");
     }
 }
 
@@ -640,6 +644,7 @@ static int GLSL_RenderTexture(SDL_Renderer * renderer, SDL_Texture * texture, co
         glUniform1i(gTouchOverlaySlot, touchoverlay_texture_slot);
         glUniform1i(gDebugOverlaySlot, debugoverlay_texture_slot);
         glUniform1i(gFlipHackSlot, flipHack);
+        glUniform1i(gDebugLayerSlot, gConfig.fEnableDebugLayer ? 1 : 0);
     }
 
     //global
@@ -880,8 +885,6 @@ void VIDEO_GLSL_RenderCopy()
     SDL_GL_BindTexture(origTexture, NULL, NULL);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, get_gl_wrap_mode(gGLSLP.shader_params[0].wrap_mode, gGLSLP.shader_params[0].scale_type_x));
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, get_gl_wrap_mode(gGLSLP.shader_params[0].wrap_mode, gGLSLP.shader_params[0].scale_type_y));
-    
-    gpDebugOverlay = SDL_CreateTextureFromSurface(gpRenderer, gpDebugLayer);
 
     SDL_Texture *prevTexture = origTexture;
     int passID = 1;
@@ -903,7 +906,6 @@ void VIDEO_GLSL_RenderCopy()
     GLSL_RenderTexture(gpRenderer, gpTexture, NULL, NULL, 0);
     
     SDL_GL_SwapWindow(gpWindow);
-    SDL_DestroyTexture(gpDebugOverlay);
 
     prevTexture = framePrevTextures[PREV_TEXTURES];
     for( int i = PREV_TEXTURES; i > 0; i-- )
