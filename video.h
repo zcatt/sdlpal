@@ -41,6 +41,7 @@ extern volatile BOOL g_bRenderPaused;
 void Filter_StepParamSlot(int step);
 void Filter_StepCurrentParam(int step);
 #endif
+void VIDEO_ToggleDebugLayer();
 
 INT
 VIDEO_Startup(

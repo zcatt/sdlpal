@@ -580,6 +580,7 @@ VIDEO_UpdateScreen(
    }
 }
 
+#if SDL_VERSION_ATLEAST(2, 0, 0)
 #define PAL_MAX_DEBUG 20
 #define PAL_MIN_FPS_SCHEDULE 0.5f
 
@@ -620,6 +621,9 @@ static void DEBUG_Compact() {
 				}
 		}
 	debugEntryCount = total;
+}
+void VIDEO_ToggleDebugLayer() {
+    gConfig.fEnableDebugLayer = !gConfig.fEnableDebugLayer;
 }
 static void DEBUG_Flush() {
 	if(!gConfig.fEnableDebugLayer)
@@ -662,7 +666,6 @@ static void DEBUG_Flush() {
 		SDL_LockSurface(gpDebugLayer);
 }
 
-#if SDL_VERSION_ATLEAST(2, 0, 0)
 VOID VIDEO_DrawFrame() {
 	static int frames = 0;
 	static uint64_t lastFrameTime = 0;
