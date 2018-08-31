@@ -602,20 +602,22 @@ void DEBUG_AddEntry(wchar_t *str, PAL_POS pos, int frames) {
 		DebugEntries[debugEntryCount++] = x;
 	else
 		DebugEntries[loc] = x;
+	assert(debugEntryCount<PAL_MAX_DEBUG);
 }
 static void DEBUG_Compact() {
 	int valids[20],total=0,step=0;
 	memset(valids,0,sizeof(valids));
 	for( int i = 0; i < debugEntryCount; i++)
-		if(DebugEntries[i].leaving_frames)
+		if(DebugEntries[i].leaving_frames>0)
 			valids[i]=1,total++;
 	for( int i = 0; i < total; i++)
 		if(valids[i]==0) {
-			int j = step;
+			int j = i;
 			for(; j < debugEntryCount; j++)
-				if(valids[j]==1)
+				if(valids[j]==1) {
+					DebugEntries[i]=DebugEntries[j];
 					break;
-			DebugEntries[i]=DebugEntries[j];
+				}
 		}
 	debugEntryCount = total;
 }
@@ -663,13 +665,13 @@ static void DEBUG_Flush() {
 #if SDL_VERSION_ATLEAST(2, 0, 0)
 VOID VIDEO_DrawFrame() {
 	static int frames = 0;
-	static DWORD lastFrameTime = 0;
-	DWORD before = SDL_GetTicks();
+	static uint64_t lastFrameTime = 0;
+	uint64_t before = SDL_GetPerformanceCounter();
 	if( lastFrameTime == 0 )
 		lastFrameTime = before;
-	if( before - lastFrameTime > 1000*PAL_MIN_FPS_SCHEDULE ) {
-		double fps = 1000.0f/(before-lastFrameTime)*frames;
-		DEBUG_AddEntry(PAL_vaw(L"%6.1fFPS",fps), PAL_XY(0, 0), PAL_MIN_FPS_SCHEDULE*fps);
+	if( before - lastFrameTime > SDL_GetPerformanceFrequency()*PAL_MIN_FPS_SCHEDULE ) {
+		double fps = 1.0f*SDL_GetPerformanceFrequency()/(before-lastFrameTime)*frames;
+		DEBUG_AddEntry(PAL_vaw(0, "%5.1fFPS",fps), PAL_XY(0, 0), 2*PAL_MIN_FPS_SCHEDULE*fps);
 		lastFrameTime = before;
 		frames = 0;
 	}
@@ -680,8 +682,15 @@ VOID VIDEO_DrawFrame() {
 	frames++;
 
 	DEBUG_Flush();
+	uint64_t after = SDL_GetPerformanceCounter();
+	uint64_t frameEstimateTime;
+	frameEstimateTime = after-before;
+	DEBUG_AddEntry(PAL_vaw(0, "debug_flush cost:%d ms\n", frameEstimateTime*1000/SDL_GetPerformanceFrequency()), PAL_XY(0, 8), 1);
 	
 	gRenderBackend.RenderCopy();
+	uint64_t after2 = SDL_GetPerformanceCounter();
+	frameEstimateTime = after2-after;
+	DEBUG_AddEntry(PAL_vaw(0, "rendercopy cost:%d ms\n", frameEstimateTime*1000/SDL_GetPerformanceFrequency()), PAL_XY(0, 16), 1);
 }
 #endif
 

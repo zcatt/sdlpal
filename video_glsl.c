@@ -1162,13 +1162,13 @@ void Filter_StepParamSlot(int step) {
         return;
     slot = (gGLSLP.uniform_parameters + slot + step) % gGLSLP.uniform_parameters;
     uniform_param *param = &gGLSLP.uniform_params[slot];
-    DEBUG_AddEntry(PAL_vaw(L"[PARAM] slot:%s cur:%.2f range:[%.2f,%.2f]\n", param->parameter_name, param->value, param->minimum, param->maximum), PAL_XY(0,gConfig.dwTextureHeight-20), 60*5);
+    DEBUG_AddEntry(PAL_vaw(0, "[PARAM] slot:%s cur:%.2f range:[%.2f,%.2f]\n", param->parameter_name, param->value, param->minimum, param->maximum), PAL_XY(0,gConfig.dwTextureHeight-20), 60*5);
 }
 void Filter_StepCurrentParam(int step) {
     if( !gConfig.fEnableGLSL || gGLSLP.uniform_parameters <= 0 )
         return;
     uniform_param *param = &gGLSLP.uniform_params[slot];
     param->value = CLAMP( param->value + step * param->step, param->minimum, param->maximum);
-    DEBUG_AddEntry(PAL_vaw(L"[PARAM] slot:%s cur:%.2f range:[%.2f,%.2f]\n", param->parameter_name, param->value, param->minimum, param->maximum), PAL_XY(0,gConfig.dwTextureHeight-20), 60*5);
+    DEBUG_AddEntry(PAL_vaw(0, "[PARAM] slot:%s cur:%.2f range:[%.2f,%.2f]\n", param->parameter_name, param->value, param->minimum, param->maximum), PAL_XY(0,gConfig.dwTextureHeight-20), 60*5);
 }
 #endif

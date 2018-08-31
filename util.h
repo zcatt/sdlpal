@@ -75,9 +75,11 @@ UTIL_va(
 );
 
 extern wchar_t __util_swprintf_buf[PAL_GLOBAL_BUFFER_SIZE];
+extern int __vaw_len;
 
 #define PAL_va(i, fmt, ...) UTIL_va(UTIL_GlobalBuffer(i), PAL_GLOBAL_BUFFER_SIZE, fmt, __VA_ARGS__)
-#define PAL_vaw(fmt, ...) (PAL_swprintf(__util_swprintf_buf, PAL_GLOBAL_BUFFER_SIZE, fmt, __VA_ARGS__),__util_swprintf_buf)
+//#define PAL_vaw(fmt, ...) (PAL_swprintf(__util_swprintf_buf, PAL_GLOBAL_BUFFER_SIZE, fmt, __VA_ARGS__),__util_swprintf_buf)
+#define PAL_vaw(i, fmt, ...) ( UTIL_va(UTIL_GlobalBuffer(i), PAL_GLOBAL_BUFFER_SIZE, fmt, __VA_ARGS__), __vaw_len = PAL_MultiByteToWideChar(UTIL_GlobalBuffer(i), -1, NULL, 0), PAL_MultiByteToWideChar(UTIL_GlobalBuffer(i), -1, __util_swprintf_buf, __vaw_len), __util_swprintf_buf )
 
 int
 RandomLong(
